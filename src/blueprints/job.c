@@ -9,6 +9,24 @@
 #include "json-builder.h"
 #include "json-helpers.h"
 
+struct Job {
+    int id;
+    int status;
+    int size;
+    bool parallel;
+    job_node* head;
+    job_node* tail;
+};
+
+struct JobRunner {
+    Job* job;
+    Site* job_site;
+    pthread_t job_tid;
+    void* (*job_thread)(void*);
+    int task_count;
+    TaskRunner* task_runners[];
+};
+
 /* job_create: Creates a new job and returns it, if the id is positive
     (id > 0). Otherwise, returns NULL. */
 Job* job_create(int id, bool parallel) {
@@ -80,6 +98,12 @@ static void update_status(Job* job) {
                     (status[TASK_INCOMPLETE] > 0)   ? JOB_INCOMPLETE :
                     (status[TASK_READY] > 0)        ? JOB_READY : 
                     /* all tasks are completed */     JOB_COMPLETED;
+}
+
+/* job_get_id: Gets the job id and returns it. Otherwise, returns -1. */
+int job_get_id(Job* job) {
+    if (!job) return -1;
+    return job->id;
 }
 
 /* job_get_status: Gets the updated status of the job. */

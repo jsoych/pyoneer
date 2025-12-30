@@ -1,7 +1,5 @@
-#ifndef _PROJECT_H
-#define _PROJECT_H
-
-#define TABLESIZE 512
+#ifndef PROJECT_H
+#define PROJECT_H
 
 #include "job.h"
 #include "json.h"
@@ -15,41 +13,25 @@ enum {
     PROJECT_INCOMPLETE
 };
 
-// project node
-typedef struct _project_node {
-    Job* job;
-    int* deps;
-    int len;
-    struct _project_node* next;
-    struct _project_node* prev;
-    struct _project_node* next_ent;
-} project_node;
-
-// jobs list
-typedef struct _project_list {
-    project_node* head;
-    project_node* tail;
-} project_list;
-
-// Project object
-typedef struct _project {
-    int id;
-    int status;
-    int len;
-    project_list jobs_list;
-    project_node* jobs_table[TABLESIZE];
-} Project;
+typedef struct Project Project;
+typedef struct ProjectRunner ProjectRunner;
 
 // Construtor and destructor
 Project *project_create(int id);
+Project* project_decode(const json_value* obj);
 void project_destroy(Project* project);
 
-// Methods
-void project_add_job(Project* project, Job* job, int* deps, int size);
-void project_remove_job(Project* project, int id);
+json_value* project_encode(Project* project);
+json_value* project_encode_status(Project* project);
+int project_get_status(Project* project);
 
-// Helpers
-json_value* project_encode(const Project* project);
-Project* project_decode(const json_value* obj);
+ProjectRunner* project_run(Project* project);
+
+void project_runner_restart(ProjectRunner* runner);
+void project_runner_stop(ProjectRunner* runner);
+void project_runner_wait(ProjectRunner* runner);
+
+int project_add(Project* project, Job* job, int* deps, int ndeps);
+int project_remove(Project* project, int id);
 
 #endif

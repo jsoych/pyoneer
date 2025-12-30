@@ -4,6 +4,14 @@
 #include "blueprint.h"
 #include "common.h"
 
+typedef struct Blueprint {
+    blueprint_t kind;
+    union {
+        Job* job;
+        Project* project;
+    } as;
+} Blueprint;
+
 /* blueprint_destroy: Destroys the blueprint and frees its resources. */
 void blueprint_destroy(Blueprint* blueprint) {
     if (!blueprint) return;
@@ -18,7 +26,7 @@ void blueprint_destroy(Blueprint* blueprint) {
 }
 
 /* blueprint_decode: Decodes the JSON object and returns a blueprint. */
-Blueprint* blueprint_decode(int kind, const json_value* obj) {
+Blueprint* blueprint_decode(blueprint_t kind, const json_value* obj) {
     Blueprint* blueprint = malloc(sizeof(Blueprint));
     if (!blueprint) {
         perror("blueprint_decode: malloc");

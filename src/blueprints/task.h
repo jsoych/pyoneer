@@ -18,18 +18,18 @@ enum {
     TASK_INCOMPLETE
 };
 
-typedef struct _task {
+typedef struct task {
     int status;
     int exit_code;
     int exit_signo;
     char* name;
 } Task;
 
-typedef struct _task_runner {
+typedef struct task_runner {
     Task* task;
     Site* site;
     pthread_t task_thread;
-    pid_t task_pid;
+    pid_t task_tid;
 } TaskRunner;
 
 // Construtor and destructor

@@ -235,7 +235,6 @@ void list_add(struct list* lst, struct node* n) {
 
 // list_print: Prints the buffer of each node.
 void list_print(struct list* lst) {
-    printf("\n----------------------------------------------------------------------\n");
     struct node* curr = lst->head;
     while (curr) {
         const char* result_type;
@@ -250,9 +249,10 @@ void list_print(struct list* lst) {
                 result_type = "UNKNOWN";
                 break;
         }
-        
-        printf("(%s) %s\n", curr->name, result_type);
-        printf("%s\n", curr->buf);
+        printf("\n======================================================================\n");
+        printf("%s: %s", result_type, curr->name);
+        printf("\n----------------------------------------------------------------------\n");
+        printf("%s", curr->buf);
         printf("\n----------------------------------------------------------------------\n");
         fflush(stdout);
         fflush(stderr);
@@ -260,9 +260,21 @@ void list_print(struct list* lst) {
     }
 }
 
+/* print_test_name: Prints the name of unittest. */
+static void print_test_name(const char* name) {
+    int len = strlen(name);
+    int padding = (70 - len - 19)/2;
+    putchar('\n');
+    for (int i = 0; i < padding; i++) putchar('-');
+    printf(" Running unittest %s ", name);
+    for (int i = 0; i < padding; i++) putchar('-');
+    if ((70 - len - 19)%2) putchar('-');
+    putchar('\n');
+}
+
 /* unittest_run: Runs all the test cases and stores its results. */
 int unittest_run(Unittest* ut) {
-    printf("----- Running unit test %s -----\n\n", ut->name);
+    print_test_name(ut->name);
     #define SUCCESS 0
     #define FAILURE 1
     #define ERROR 2
@@ -285,7 +297,7 @@ int unittest_run(Unittest* ut) {
         dup2(test_pipe[1], STDERR_FILENO);
         close(test_pipe[1]);
 
-        dprintf(saved_out, "(%s) ...", ut->cases[i]->name);
+        dprintf(saved_out, "%s ... ", ut->cases[i]->name);
 
         // Run test case
         int result = ut->tests[i](ut->cases[i]);

@@ -1,3 +1,4 @@
 bin
 etc
 build
+tests/__pycache__

@@ -1,24 +1,55 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "logger.h"
 
+static const char* level_str(int level) {
+    switch (level) {
+        case LOGGER_DEBUG:  return "DEBUG";
+        case LOGGER_INFO:   return "INFO";
+        case LOGGER_WARN:   return "WARN";
+        case LOGGER_ERROR:  return "ERROR";
+    }
+    return NULL;
+}
+
+static void timestamp_rfc3339_ms(char* out, size_t out_sz) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    struct tm tm_utc;
+    gmtime_r(&ts.tv_sec, &tm_utc);
+
+    int ms = (int)(ts.tv_nsec / 1000000L);
+    snprintf(out, out_sz,
+             "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+             tm_utc.tm_year + 1900,
+             tm_utc.tm_mon + 1,
+             tm_utc.tm_mday,
+             tm_utc.tm_hour,
+             tm_utc.tm_min,
+             tm_utc.tm_sec,
+             ms);
+}
+
 /* logger_create: Creates a new logger and returns it. */
-Logger* logger_create(int level, const char* format) {
+Logger* logger_create(int level, const char* name) {
     Logger* logger = malloc(sizeof(Logger));
-    if (logger == NULL) {
+    if (!logger) {
         perror("logger_create: malloc");
         return NULL;
     }
 
     logger->level = level;
-    logger->format = strdup(format);
+    logger->name = strdup(name);
 
     int err = pthread_mutex_init(&logger->lock, NULL);
     if (err != 0) {
         fprintf(stderr, "logger_create: pthread_mutex_init: %s", strerror(err));
-        free(logger->format);
+        free(logger->name);
         free(logger);
         return NULL;
     }
@@ -29,33 +60,32 @@ Logger* logger_create(int level, const char* format) {
 /* logger_destroy: Destroys the logger and its resources. */
 void logger_destroy(Logger* logger) {
     if (!logger) return;
-    free(logger->format);
+    free(logger->name);
     pthread_mutex_destroy(&logger->lock);
     free(logger);
 }
 
-/* logger_stream_handler: Prints the log to the stdout. */
-static void logger_stream_handler(Logger* logger, const char* message) {
-    printf(logger->format, message);
-}
+int logger_log(Logger* logger, int level, const char* fmt, ...) {
+    if (level < logger->level) return 0;
 
-/* logger_info: Logs info message and returns 0. */
-int logger_info(Logger* logger, const char* message) {
-    pthread_mutex_lock(&logger->lock);
-    logger_stream_handler(logger, message);
-    pthread_mutex_unlock(&logger->lock);
-    return 0;
-}
+    char ts[64];
+    timestamp_rfc3339_ms(ts, sizeof(ts));
 
-/* logger_debug: Logs debug message and returns 0. */
-int logger_debug(Logger* logger, const char* message) {
+    char msg[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+
+    char line[1400];
+    int n = snprintf(line, sizeof(line), "[%s] %s %s %s\n",
+        ts, level_str(level), logger->name, msg);
+    FILE* stream = (level >= LOGGER_WARN) ? stderr : stdout;
+
     pthread_mutex_lock(&logger->lock);
-    switch (logger->level) {
-        case LOGGER_DEBUG:
-            logger_stream_handler(logger, message);
-        case LOGGER_INFO:
-            break;
-    }
+    fwrite(line, 1, (size_t)((n > 0) ? n : (int)strlen(line)), stream);
+    if (level >= LOGGER_WARN) fflush(stream);
     pthread_mutex_unlock(&logger->lock);
+
     return 0;
 }

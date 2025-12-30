@@ -1,378 +1,295 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include <errno.h>
+#include <poll.h>
+#include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
+
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netdb.h>
 
 #include "server.h"
-#include "json-builder.h"
-#include "json-helpers.h"
+#include "thread_pool.h"
+#include "client.h"
 
-#define BACKLOG 5
-#define BUFLEN 4096
-#define CAPACITY 8
-#define server_ERROR -1
+#define DEFAULT_BACKLOG 256
+#define DEFAULT_WORKERS 8
+#define DEFAULT_QCAP    128
 
-// Globals
-volatile sig_atomic_t sig_flag = 0;
+/* listener: internal representation of server_endpoint at runtime */
+typedef struct {
+    server_endpoint cfg;
+    int fd;
+    char label[128];
+} listener;
 
-// Client status codes
-static enum {
-    CLIENT_ACTIVE,
-    CLIENT_INACTIVE
-};
-
-// Client structure
-static struct server_client {
-    int status;
-    int client_fd;
-    pthread_t tid;
-    Server* server;
-    struct server_client* next;
-};
-
-static const char* const API_MSG[] = {
-    [SERVER_START]          = "API: starting server",
-    [SERVER_STOP]           = "API: stopping server",
-    [SERVER_RUN]            = "API: pyoneer is running"
-};
-
-static const char* const API_ERR_MSG[] = {
-    [ERR_INTERNAL]          = "API: internal error",
-    [ERR_SHUTTING_DOWN]     = "API: shutting down",
-    [ERR_CMD]               = "API: command error",
-    [ERR_BLUEPRINT]         = "API: blueprint error",
-    [ERR_SIGNAL]            = "API: signal error",
-    [ERR_JSON_PARSE]        = "API: invalid JSON payload",
-    [ERR_JSON_TYPE]         = "API: invalid JSON type",
-    [ERR_JSON_MISSING]      = "API: missing JSON value",
-    [ERR_TOKEN]             = "API: invalid token"
-};
-
-// Api server
-typedef struct _server {
+/* Server: opaque in header, defined here */
+struct server {
     Pyoneer* pyoneer;
     Logger* logger;
-    char* socket_path;
+
     char* token;
-    int server_fd;
-    struct server_client* clients;
-} Server;
 
-/* server_client_thread: Handles the clients api requests. */
-static void* server_client_thread(void* arg) {
-    struct server_client* client = (struct server_client*)arg;
-    Pyoneer* pyoneer = client->server->pyoneer;
-    Logger* logger = client->server->logger;
+    listener* listeners;
+    size_t nlisteners;
 
-    json_settings settings = {0};
-    settings.value_extra = json_builder_extra;
-    char error[json_error_max];
+    ThreadPool* pool;
 
-    int nbytes;
-    char buf[BUFLEN];
-    while ((nbytes = recv(client->client_fd, buf, BUFLEN, 0)) > 0) {
-        buf[nbytes] = '\0';
-        logger_debug(logger, buf);
+    atomic_int stop_flag;
+};
 
-        // Create response
-        json_value* resp = json_object_new(0);
-        if (!resp) {
-            logger_debug(logger, API_ERR_MSG[ERR_INTERNAL]);
-            break;
-        }
-
-        // Parse request
-        json_value* req = json_parse_ex(&settings, buf, nbytes, error);
-        if (!req) {
-            logger_info(logger, API_ERR_MSG[ERR_JSON_PARSE]);
-            logger_debug(logger, error);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_JSON_PARSE]);
-            goto send;
-        }
-
-        // Check request
-        if (req->type != json_object) {
-            logger_info(logger, API_ERR_MSG[ERR_JSON_TYPE]);
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_JSON_TYPE]);
-            goto send;
-        }
-
-        // Check token
-        json_value* token = json_object_get_value(req, "token");
-        if (!token) {
-            logger_info(logger, API_ERR_MSG[ERR_JSON_MISSING]);
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_JSON_MISSING]);
-            goto send;
-        }
-
-        if (token->type != json_string) {
-            logger_info(logger, API_ERR_MSG[ERR_JSON_TYPE]);
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_JSON_TYPE]);
-            goto send;
-        }
-
-        if (strcmp(token->u.string.ptr, client->server->token) != 0) {
-            logger_info(logger, API_ERR_MSG[ERR_TOKEN]);
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_TOKEN]);
-            goto send;
-        }
-
-        json_value* cmd = json_object_get_value(req, "command");
-        if (!cmd) {
-            logger_info(logger, API_ERR_MSG[ERR_JSON_MISSING]);
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_JSON_MISSING]);
-            goto send;
-        }
-
-        // Call pyoneer commands
-        if (strcmp(cmd->u.string.ptr, "run") == 0) {
-            Blueprint* blueprint = pyoneer_blueprint_decode(pyoneer, req);
-            if (!blueprint) {
-                logger_info(logger, API_ERR_MSG[ERR_BLUEPRINT]);
-                logger_debug(logger, buf);
-                json_object_push_string(resp, "Error", API_ERR_MSG[ERR_BLUEPRINT]);
-                goto send;
-            }
-            
-            json_value* status = pyoneer->run(pyoneer, blueprint);
-            json_object_push(resp, "pyoneer", status);
-        }
-        // get_status
-        else if (strcmp(cmd->u.string.ptr, "get_status") == 0) {
-            json_value* status = pyoneer->get_status(pyoneer);
-            json_object_push(resp, "pyoneer", status);
-        }
-        // assign
-        else if (strcmp(cmd->u.string.ptr, "assign") == 0) {
-            Blueprint* blueprint = pyoneer_blueprint_decode(pyoneer, req);
-            if (!blueprint) {
-                logger_info(logger, API_ERR_MSG[ERR_BLUEPRINT]);
-                logger_debug(logger, buf);
-                json_object_push_string(resp, "Error", API_ERR_MSG[ERR_BLUEPRINT]);
-                goto send;
-            }
-
-            json_value* status = pyoneer->assign(pyoneer, blueprint);
-            json_object_push(resp, "pyoneer", status);
-        }
-        // Restart
-        else if (strcmp(cmd->u.string.ptr, "restart") == 0) {
-            pyoneer->restart(pyoneer);
-        }
-        // Start
-        else if (strcmp(cmd->u.string.ptr, "start") == 0) {
-            pyoneer->start(pyoneer);
-        }
-        // Stop
-        else if (strcmp(cmd->u.string.ptr, "stop") == 0) {
-            pyoneer->stop(pyoneer);
-        }
-        // Unknown command
-        else {
-            logger_debug(logger, buf);
-            json_object_push_string(resp, "Error", API_ERR_MSG[ERR_CMD]);
-        }
-
-        send:
-        if (json_measure(resp) > BUFLEN) {
-            sig_flag = -1; // Exit loop
-            logger_info(logger, API_ERR_MSG[ERR_INTERNAL]);
-            logger_info(logger, API_ERR_MSG[ERR_SHUTTING_DOWN]);
-            logger_debug(logger, buf);
-            strcpy(buf, "{\"error\":\"api failure\"}");
-        } else {
-            json_serialize(buf, resp);
-            logger_debug(logger, buf);
-        }
-
-        if (send(client->client_fd, buf, strlen(buf), 0) == -1) {
-            sig_flag = -1; // Exit loop
-            perror("api: send");
-        }
-
-        json_builder_free(resp);
-    }
-
-    // close socket
-    close(client->client_fd);
-    return NULL;
-}
-
-/* server_signal_handler: Handles the signal to the Api server. */
-static void server_signal_handler(int signo) {
-    sig_flag = 1;
-}
-
-/* server_create: Creates a new server and returns it. */
-Server* server_create(Pyoneer* pyoneer, Logger* logger,
-    const char* socket_path, const char* token) {
-    Server* server = malloc(sizeof(Server));
-    if (!server) {
-        perror("server_create: malloc");
-        return NULL;
-    }
-    server->pyoneer = pyoneer;
-    server->logger = logger;
-    server->socket_path = strdup(socket_path);
-    server->token = strdup(token);
-    server->server_fd = -1;
-    server->clients = NULL;
-
-    struct sigaction sa = {0};
-    sa.sa_handler = server_signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("server_create: sigaction");
-        free(server->socket_path);
-        free(server);
-        return NULL;
-    }
-    return server;
-}
-
-/* server_destroy: Stops the server and frees its resources. */
-void server_destroy(Server* server) {
-    if (!server) return;
-    free(server->socket_path);
-    free(server->token);
-    free(server);
-
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_DFL;
-    if (sigaction(SIGINT, &sa, NULL) == -1)
-        perror("server_destroy: sigaction");
-}
-
-/* server_add_client: Adds a client to the server and returns a pointer to the
-    newly created client */
-static struct server_client* server_add_client(Server* server, int client_fd) {
-    struct server_client* client = malloc(sizeof(struct server_client));
-    if (client == NULL) {
-        perror("server_add_client: malloc");
-        return NULL;
-    }
-
-    client->client_fd = client_fd;
-    client->status = CLIENT_ACTIVE;
-    client->server = server;
-    client->next = NULL;
-
-    struct server_client* curr = server->clients;
-    struct server_client* prev = NULL;
-    while (curr) {
-        if (curr->status == CLIENT_INACTIVE) {
-            struct server_client* tmp = curr->next;
-            if (prev){
-                prev->next = tmp;
-            } else {
-                server->clients = tmp;
-            }
-            free(curr);
-            curr = tmp;
-        } else {
-            prev = curr;
-            curr = curr->next;
-        }
-    }
-
-    if (prev) {
-        prev->next = client;
+static void listener_format_label(listener* l) {
+    if (l->cfg.type == EP_TCP) {
+        const char* host = l->cfg.host ? l->cfg.host : "*";
+        const char* port = l->cfg.port ? l->cfg.port : "?";
+        snprintf(l->label, sizeof(l->label), "tcp:%s:%s", host, port);
     } else {
-        server->clients = client;
+        snprintf(l->label, sizeof(l->label), "unix:%s", l->cfg.path);
     }
-
-    return client;
 }
 
-/* server_start: Creates a socket and listens for client connections. If the
-    process encounters an interupt, the server stops listening for new
-    client connections and returns 0. Otherwise, returns -1. */
-int server_start(Server* server) {
-    if (!server) return -1;
+static int make_unix_listener(const char* path, int backlog) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
 
-    // Create local socket
-    server->server_fd = socket(AF_LOCAL, SOCK_STREAM, 0);
-    if (server->server_fd == -1) {
-        perror("server_start: socket");
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return -1;
+    }
+    if (listen(fd, backlog) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static int make_tcp_listener(const char* host, const char* port, int backlog) {
+    struct addrinfo hints;
+    struct addrinfo* res = NULL;
+    struct addrinfo* it = NULL;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    int rc = getaddrinfo(host, port, &hints, &res);
+    if (rc != 0) {
+        errno = EINVAL;
         return -1;
     }
 
-    struct sockaddr_un addr = {0};
-    addr.sun_family = AF_LOCAL;
-    strncpy(addr.sun_path, server->socket_path, sizeof(addr.sun_path));
+    int fd = -1;
+    for (it = res; it; it = it->ai_next) {
+        fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (fd < 0) continue;
 
-    if (bind(server->server_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-        perror("server_server_run: bind");
-        close(server->server_fd);
-        return -1;
+        int yes = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+        if (bind(fd, it->ai_addr, it->ai_addrlen) == 0) {
+            if (listen(fd, backlog) == 0) break;
+        }
+        
+        close(fd);
+        fd = -1;
     }
 
-    if (listen(server->server_fd, BACKLOG) == -1) {
-        perror("server_server_run: listen");
-        close(server->server_fd);
-        return -1;
-    }
+    freeaddrinfo(res);
+    return fd;
+}
 
-    logger_info(server->logger, API_MSG[SERVER_START]);
-    logger_debug(server->logger, server->socket_path);
+/* server_listeners_init: create listener sockets from cfg endpoints */
+static int server_listeners_init(Server* s, const server_config* cfg) {
+    s->listeners = calloc(cfg->nendpoints, sizeof(listener));
+    if (!s->listeners) return -1;
 
-    while (sig_flag != 1) {
-        int client_fd = accept(server->server_fd, NULL, NULL);
-        if (client_fd == -1) {
-            if (errno == EINTR) continue;
-            perror("server_server_run: accept");
-            break;
+    s->nlisteners = cfg->nendpoints;
+
+    for (size_t i = 0; i < s->nlisteners; i++) {
+        s->listeners[i].cfg = cfg->endpoints[i];
+        s->listeners[i].fd  = -1;
+
+        listener_format_label(&s->listeners[i]);
+
+        int backlog = (s->listeners[i].cfg.backlog > 0) ?
+            s->listeners[i].cfg.backlog : DEFAULT_BACKLOG;
+
+        if (s->listeners[i].cfg.type == EP_UNIX) {
+            if (!s->listeners[i].cfg.path) {
+                logger_error(s->logger,
+                    "server_create: unix endpoint missing path");
+                return -1;
+            }
+            s->listeners[i].fd = make_unix_listener(s->listeners[i].cfg.path,
+                backlog);
+        } else {
+            if (!s->listeners[i].cfg.port) {
+                logger_error(s->logger,
+                    "server_create: tcp endpoint missing port");
+                return -1;
+            }
+            s->listeners[i].fd = make_tcp_listener(s->listeners[i].cfg.host,
+                s->listeners[i].cfg.port, backlog);
         }
 
-        struct server_client* client = server_add_client(server, client_fd);
-        if (client == NULL) {
-            close(client_fd);
-            continue;
+        if (s->listeners[i].fd < 0) {
+            logger_errorf(s->logger,
+                "server_create: failed to listen on %s: %s",
+                s->listeners[i].label,
+                strerror(errno)
+            );
+            return -1;
         }
 
-        int err = pthread_create(&client->tid, NULL, server_client_thread, client);
-        if (err != 0) {
-            fprintf(stderr, "server_server_run: pthread_create: %s\n", strerror(err));
-            break;
-        }
-    }
-
-    if (sig_flag == 1) {
-        server_stop(server);
-        unlink(server->socket_path);
+        logger_infof(s->logger, "listen %s", s->listeners[i].label);
     }
 
     return 0;
 }
 
-/* server_stop: Stops the server and frees all resources, and returns 0. */
-int server_stop(Server* server) {
-    if (!server) return 0;
-    logger_info(server->logger, API_MSG[SERVER_STOP]);
-    struct server_client* curr = server->clients;
-    while (curr) {
-        struct server_client* next = curr->next;
-        if (curr->status == CLIENT_ACTIVE) {
-            int err = pthread_cancel(curr->tid);
-            if (err != 0)
-                fprintf(stderr, "server_stop: pthread_cancel: %s\n", strerror(err));
+/* server_listeners_destroy: Close all listener sockets + unlink unix paths */
+static void server_listeners_destroy(Server* s) {
+    if (!s || !s->listeners) return;
+
+    for (size_t i = 0; i < s->nlisteners; i++) {
+        if (s->listeners[i].fd >= 0) close(s->listeners[i].fd);
+
+        if (s->listeners[i].cfg.type == EP_UNIX && s->listeners[i].cfg.path) {
+            unlink(s->listeners[i].cfg.path);
         }
-        free(curr);
-        curr = next;
     }
-    server->clients = NULL;
-    close(server->server_fd);
-    server->server_fd = -1;
+    free(s->listeners);
+    s->listeners = NULL;
+    s->nlisteners = 0;
+}
+
+Server* server_create(Pyoneer* pyoneer, Logger* logger,
+    const server_config* cfg) {
+    if (!pyoneer || !logger || !cfg) return NULL;
+
+    if (!cfg->endpoints || cfg->nendpoints == 0) {
+        logger_error(logger, "server_create: Missing endpoints");
+        return NULL;
+    }
+
+    Server* s = malloc(sizeof(Server));
+    if (!s) return NULL;
+
+    s->pyoneer = pyoneer;
+    s->logger  = logger;
+    atomic_store(&s->stop_flag, 0);
+
+    s->token = cfg->token ? strdup(cfg->token) : NULL;
+
+    if (server_listeners_init(s, cfg) != 0) {
+        server_destroy(s);
+        return NULL;
+    }
+
+    size_t nworkers = cfg->nworkers ? cfg->nworkers : DEFAULT_WORKERS;
+    size_t qcap = cfg->queue_capacity ? cfg->queue_capacity : DEFAULT_QCAP;
+
+    // Create thread pool
+    s->pool = thread_pool_create(nworkers, qcap, s);
+    if (!s->pool) {
+        logger_error(s->logger, "server_create: Failed to create thread pool");
+        server_destroy(s);
+        return NULL;
+    }
+
+    return s;
+}
+
+void server_destroy(Server* s) {
+    if (!s) return;
+
+    if (s->pool) {
+        thread_pool_destroy(s->pool);
+        s->pool = NULL;
+    }
+
+    server_listeners_destroy(s);
+
+    free(s->token);
+    free(s);
+}
+
+/* Server getters */
+Logger* server_logger(Server* s) { return s->logger; }
+Pyoneer* server_pyoneer(Server* s) { return s->pyoneer; }
+const char* server_token(Server* s) { return s->token; }
+
+
+/* server_stop: signal safe-ish (sets flag + wakes pool) */
+void server_stop(Server* s) {
+    if (!s) return;
+    atomic_store(&s->stop_flag, 1);
+    if (s->pool) thread_pool_shutdown(s->pool);
+}
+
+/*
+ * server_run: multiple endpoint accept loop.
+ * Uses poll() across all listener sockets.
+ */
+int server_run(Server* s) {
+    if (!s) return -1;
+
+    logger_info(s->logger, "server_run: starting");
+
+    struct pollfd* pfds = calloc(s->nlisteners, sizeof(struct pollfd));
+    if (!pfds) return -1;
+
+    for (size_t i = 0; i < s->nlisteners; i++) {
+        pfds[i].fd = s->listeners[i].fd;
+        pfds[i].events = POLLIN;
+    }
+
+    while (!atomic_load(&s->stop_flag)) {
+        int rc = poll(pfds, s->nlisteners, 500);
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            logger_errorf(s->logger, "poll: %s", strerror(errno));
+            break;
+        }
+        if (rc == 0) continue;
+
+        for (size_t i = 0; i < s->nlisteners; i++) {
+            if (!(pfds[i].revents & POLLIN)) continue;
+
+            int client_fd = accept(pfds[i].fd, NULL, NULL);
+            if (client_fd < 0) {
+                if (errno == EINTR) continue;
+                logger_warnf(s->logger, "accept %s: %s",
+                             s->listeners[i].label, strerror(errno));
+                continue;
+            }
+
+            /*
+             * Submit accepted connection to thread pool.
+             * ThreadPool owns the fd until client handler closes it.
+             */
+            if (thread_pool_submit(s->pool, client_fd, (int)i) != 0) {
+                logger_warnf(s->logger,
+                    "pool busy/shutting down: closing client (%s)",
+                    s->listeners[i].label
+                );
+                close(client_fd);
+            }
+        }
+    }
+
+    free(pfds);
+    logger_info(s->logger, "server_run: stopping");
     return 0;
 }

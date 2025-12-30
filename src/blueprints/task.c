@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
 #include <string.h>
@@ -58,6 +59,12 @@ static void update_status(Task* task) {
     }
 }
 
+/* task_get_name: Gets the name of the task. */
+const char* task_get_name(Task* task) {
+    if (!task) return "";
+    return task->name;
+}
+
 /* task_get_status: Get the task status and returns it. */
 int task_get_status(Task* task) {
     update_status(task);
@@ -67,8 +74,8 @@ int task_get_status(Task* task) {
 static void task_runner_handler(void* arg) {
     TaskRunner* runner = (TaskRunner*)arg;
     int status;
-    kill(runner->task_pid, SIGINT);
-    waitpid(runner->task_pid, &status, 0);
+    kill(runner->task_tid, SIGINT);
+    waitpid(runner->task_tid, &status, 0);
     if (WIFEXITED(status)) {
         runner->task->exit_code = WEXITSTATUS(status);
         runner->task->exit_signo = SIGSENT;
@@ -92,8 +99,17 @@ static void* task_runner_thread(void* arg) {
 
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
+
+    // Change working directory
     posix_spawn_file_actions_addchdir_np(&actions, site->working_dir);
-    if (posix_spawn(&runner->task_pid, site->python, &actions, NULL,
+
+    // Redirect stdin/stdout/stderr to /dev/null
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO,  "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+    // Spawn the task process
+    if (posix_spawn(&runner->task_tid, site->python, &actions, NULL,
         argv, environ) == -1) {
         perror("task_thread: posix_spawn");
         posix_spawn_file_actions_destroy(&actions);
@@ -105,7 +121,7 @@ static void* task_runner_thread(void* arg) {
     // Wait for task to complete
     pthread_cleanup_push(task_runner_handler, runner);
     int status;
-    waitpid(runner->task_pid, &status, 0);
+    waitpid(runner->task_tid, &status, 0);
     if (WIFEXITED(status)) {
         runner->task->exit_code = WEXITSTATUS(status);
         runner->task->exit_signo = SIGSENT;
@@ -141,8 +157,10 @@ TaskRunner* task_run(Task* task, Site* site) {
     return runner;
 }
 
-/* task_runner_start: Starts the task runner. */
-void task_runner_start(TaskRunner* runner) {
+/* task_runner_restart: Restarts the task runner. */
+void task_runner_restart(TaskRunner* runner) {
+    pthread_cancel(runner->task_thread);
+    pthread_join(runner->task_thread, NULL);
     int err = pthread_create(&runner->task_thread, NULL,
         task_runner_thread, runner);
     if (err != 0) {

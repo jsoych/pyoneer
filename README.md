@@ -1,5 +1,5 @@
 # Pyoneer
-Pyoneer is a distributed system designed to extend a local python environment to many machines. Since python programs range in complexity, Pyoneer defines a collection of resources that structure the program proportional to its needs. For example, if we need to run several related tasks, we can create a resource that bundles together those tasks together and execute them on a remote machine. The goal of the Pyoneer is to be very lightweight in configuration and to sit on top of a python environment :).
+Pyoneer is a distributed system designed to extend a local Python environment to many machines. Since Python programs range in complexity, Pyoneer defines a collection of resources that structure the program proportional to its needs. For example, if we need to run several related tasks, we can create a resource that bundles those tasks together and execute them on a remote machine. The goal of Pyoneer is to be very light in configuration and to sit on top of a Python environment :).
 
 ## Definitions
 
@@ -26,7 +26,7 @@ To avoid confusion with the name of the distributed system, we use:
 
 - The state of the distributed system is modelled as a **cartesian product** of each agent and resource state. 
   - *Informally:* the state of Pyoneer is the status of each pyoneer and its blueprint, and state transitions are pyoneers working on their assigned blueprints.
-  - *Formally:* Let $V$ and $W$ denote the sets of all agent and resource states respectively. Then $$Q = \overbrace{V \times W \times \cdots \times V \times W}^{2n}$$ where $n$ denotes the number of agents and resources in the distributed system.
+  - *Formally:* Let $V$ and $W$ denote the sets of all agent and resource states respectively. Then $Q = \overbrace{V \times W \times \cdots \times V \times W}^{2n}$, where $n$ denotes the number of agents and resources in the distributed system.
 
 - There is a **1-to-1 relationship** between pyoneers and blueprints in the system.  
   - *Example:* a worker is assigned a job and a job is completed by a worker.
@@ -60,4 +60,4 @@ To avoid confusion with the name of the distributed system, we use:
 
 - Managers communicate with workers, and workers communicate with the runtime engine. Workers do **not** communicate with other workers.
 
-- Workers are **lazy**, that is, they idle after completing a job and wait for another job assignment.
+- Workers are **lazy** and idle after completing a job.

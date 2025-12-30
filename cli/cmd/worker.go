@@ -203,5 +203,5 @@ func defaultSockPath() string {
 	if v := os.Getenv("WORKER_SOCK"); v != "" {
 		return v
 	}
-	return "/Users/leejahsprock/cs/distributed-systems/etc/worker.sock"
+	return "/Users/leejahsprock/cs/pyoneer/etc/worker.sock"
 }
