@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "test_blueprints.h"
 #include "json-builder.h"
@@ -7,27 +8,34 @@
 
 extern Site* SITE;
 
-const char* JOB_JSON = "{\"id\": 33, \"tasks\": [{\"name\": \"task.py\"}, {\"name\": \"task.py\"}, {\"name\": \"task.py\"}]}";
-const char* JOB_JSON_INVALID_TASK = "{\"id\": 42, \"tasks\": [{\"key\": \"value\"}]}";
+const char* JOB_JSON = \
+"{ \
+    \"id\": 33, \
+    \"tasks\": [{\"name\": \"task.py\"}, {\"name\": \"task.py\"}], \
+    \"execMode\": \"sequential\", \
+    \"runMode\": \"repeat\" \
+}";
+const char* JOB_JSON_INVALID_TASK = \
+"{ \
+    \"id\": 42, \
+    \"tasks\": [{\"key\": \"value\"}] \
+}";
 
 static result_t test_case_create(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     if (job == NULL) return UNITTEST_FAILURE;
     
     // Check properties
     int result = 0;
-    if (job->id != VALID_ID ||
-        job->status != JOB_READY ||
-        job->size != 0 ||
-        job->head != NULL) result = 1;
+    if (job_get_id(job) != VALID_ID || job_get_status(job) != JOB_READY ||
+        job_get_size(job) != 0) result = 1;
                 
     job_destroy(job);
-    if (result == 0) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
+    RETURN_RESULT(result);
 }
 
 static result_t test_case_invalid_id(unittest_case* expected) {
-    Job* job = job_create(INVALID_ID, false);
+    Job* job = job_create(INVALID_ID);
     if (job == NULL) return UNITTEST_SUCCESS;
     job_destroy(job);
     return UNITTEST_FAILURE;
@@ -37,7 +45,7 @@ static result_t test_case_destroy(unittest_case* expected) {
     // Check NULL
     job_destroy(NULL);
 
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     for (int i = 0; i < 10; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
@@ -48,7 +56,7 @@ static result_t test_case_destroy(unittest_case* expected) {
 }
 
 static result_t test_case_get_status(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     for (int i = 0; i < 3; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
@@ -56,9 +64,9 @@ static result_t test_case_get_status(unittest_case* expected) {
 
     // Check ready
     if (job_get_status(job) != JOB_READY) {
-        job_node* curr = job->head;
+        job_node* curr = job_get_tasks(job);
         while (curr) {
-            printf("task status: %d\n", curr->task->status);
+            printf("task status: %d\n", task_get_status(curr->task));
             curr = curr->next;
         }
         job_destroy(job);
@@ -67,7 +75,8 @@ static result_t test_case_get_status(unittest_case* expected) {
     }
 
     // Check running
-    job->head->next->task->status = TASK_RUNNING;
+    job_node* head = job_get_tasks(job);
+    task_set_status(head->next->task, TASK_RUNNING);
     if (job_get_status(job) != JOB_RUNNING) {
         job_destroy(job);
         printf("failed running check");
@@ -75,7 +84,7 @@ static result_t test_case_get_status(unittest_case* expected) {
     }
 
     // Check not ready
-    job->head->next->task->status = TASK_NOT_READY;
+    task_set_status(head->next->task, TASK_NOT_READY);
     if (job_get_status(job) != JOB_NOT_READY) {
         job_destroy(job);
         printf("failed not ready check");
@@ -83,9 +92,9 @@ static result_t test_case_get_status(unittest_case* expected) {
     }
 
     // Check completed
-    job_node* curr = job->head;
+    job_node* curr = job_get_tasks(job);
     while (curr) {
-        curr->task->status = TASK_COMPLETED;
+        task_set_status(curr->task, TASK_COMPLETED);
         curr = curr->next;
     }
     
@@ -96,7 +105,7 @@ static result_t test_case_get_status(unittest_case* expected) {
     }
 
     // Check incomplete
-    job->head->next->next->task->status = TASK_INCOMPLETE;
+    task_set_status(head->next->next->task, TASK_INCOMPLETE);
     if (job_get_status(job) != JOB_INCOMPLETE) {
         job_destroy(job);
         printf("failed incomplete check");
@@ -108,7 +117,7 @@ static result_t test_case_get_status(unittest_case* expected) {
 }
 
 static result_t test_case_run(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     JobRunner* runner = job_run(job, SITE);
     if (runner) {
         job_destroy(job);
@@ -138,7 +147,7 @@ static result_t test_case_run(unittest_case* expected) {
 }
 
 static result_t test_case_bug(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     for (int i = 0; i < 4; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
@@ -156,16 +165,6 @@ static result_t test_case_bug(unittest_case* expected) {
     return UNITTEST_FAILURE;
 }
 
-static result_t test_case_parallel(unittest_case* expected) {
-    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 3, BUG_NAME, 2);
-    job->parallel = true;
-    JobRunner* runner = job_run(job, SITE);
-    job_runner_wait(runner);
-    job_destroy(job);
-    job_runner_destroy(runner);
-    return UNITTEST_SUCCESS;
-}
-
 static result_t test_case_many_bugs(unittest_case* expected) {
     Job* job = unittest_job_create(VALID_ID, TASK_NAME, 1, BUG_NAME, 5);
     JobRunner* runner = job_run(job, SITE);
@@ -175,8 +174,100 @@ static result_t test_case_many_bugs(unittest_case* expected) {
     return UNITTEST_SUCCESS;
 }
 
+static result_t test_case_parallel(unittest_case* expected) {
+    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 3, BUG_NAME, 2);
+    job_opts_t opts = job_opts_default();
+    opts.exec_mode = JOB_EXEC_PARALLEL;
+    job_set_opts(job, &opts);
+    JobRunner* runner = job_run(job, SITE);
+    job_runner_wait(runner);
+    job_destroy(job);
+    job_runner_destroy(runner);
+    return UNITTEST_SUCCESS;
+}
+
+static void print_info(job_runner_info_t* info) {
+    printf("attempts %d, completions %d, successes %d",
+        info->attempts, info->completions, info->successes);
+}
+
+static result_t test_case_repeat(unittest_case* expected) {
+    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 3, NULL, 0);
+    job_opts_t opts = job_opts_default();
+    opts.run_mode = JOB_RUN_REPEAT;
+    job_set_opts(job, &opts);
+
+    JobRunner* runner = job_run(job, SITE);
+    job_runner_info_t info = job_runner_get_info(runner);
+    int i = 0;
+    do {
+        if (info.attempts < info.completions) {
+            printf("less attemps than completions");
+            job_runner_destroy(runner);
+            job_destroy(job);
+            return UNITTEST_FAILURE;
+        }
+
+        if (info.completions < info.successes) {
+            printf("less completions than successes");
+            job_runner_destroy(runner);
+            job_destroy(job);
+            return UNITTEST_FAILURE;
+        }
+
+        info = job_runner_get_info(runner);
+        i++;
+        sleep(1);
+    } while (info.attempts < 3 && i < 15);
+
+    if (i == 15) {
+        print_info(&info);
+        job_runner_destroy(runner);
+        job_destroy(job);
+        return UNITTEST_FAILURE;
+    }
+    job_runner_destroy(runner);
+    job_destroy(job);
+    return UNITTEST_SUCCESS;
+}
+
+static result_t test_case_parallel_repeat(unittest_case* expected) {
+    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 20, BUG_NAME, 10);
+    job_opts_t opts = job_opts_default();
+    opts.exec_mode = JOB_EXEC_PARALLEL;
+    opts.run_mode = JOB_RUN_REPEAT;
+    job_set_opts(job, &opts);
+
+    JobRunner* runner = job_run(job, SITE);
+    job_runner_info_t info = {0};
+    int i = 0;
+    do {
+        info = job_runner_get_info(runner);
+        i++;
+        sleep(1);
+    } while (info.attempts < 3 && i < 30);
+
+    if (i == 30) {
+        print_info(&info);
+        job_runner_destroy(runner);
+        job_destroy(job);
+        return UNITTEST_FAILURE;
+    }
+
+    if (info.attempts != 3 || info.successes != 0) {
+        print_info(&info);
+        job_runner_destroy(runner);
+        job_destroy(job);
+        return UNITTEST_FAILURE;
+    }
+
+    job_runner_destroy(runner);
+    job_destroy(job);
+    return UNITTEST_SUCCESS;
+}
+
 static result_t test_case_stop(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     for (int i = 0; i < 3; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
@@ -195,8 +286,8 @@ static result_t test_case_stop(unittest_case* expected) {
 }
 
 static result_t test_case_add(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
-    if (job->size != 0) {
+    Job* job = job_create(VALID_ID);
+    if (job_get_size(job) != 0) {
         job_destroy(job);
         return UNITTEST_FAILURE;
     }
@@ -207,7 +298,7 @@ static result_t test_case_add(unittest_case* expected) {
         job_add_task(job, task);
     }
 
-    if (job->size != 3) {
+    if (job_get_size(job) != 3) {
         job_destroy(job);
         return UNITTEST_FAILURE;
     }
@@ -218,7 +309,7 @@ static result_t test_case_add(unittest_case* expected) {
         job_add_task(job, task);
     }
 
-    if (job->size != 10) {
+    if (job_get_size(job) != 10) {
         job_destroy(job);
         return UNITTEST_FAILURE;
     }
@@ -228,11 +319,14 @@ static result_t test_case_add(unittest_case* expected) {
 }
 
 static result_t test_case_encode(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
-    for (int i = 0; i < 3; i++) {
+    Job* job = job_create(VALID_ID);
+    for (int i = 0; i < 2; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
     }
+    job_opts_t opts = job_opts_default();
+    opts.run_mode = JOB_RUN_REPEAT;
+    job_set_opts(job, &opts);
 
     json_value* actual = job_encode(job);
     if (!actual) {
@@ -250,10 +344,11 @@ static result_t test_case_encode(unittest_case* expected) {
     }
 
     char buf[BUFSIZE] = {0};
-    printf("actual %s\n", buf);
+    json_serialize(buf, actual);
+    printf("actual: %s\n", buf);
 
     json_serialize(buf, expected->as.json);
-    printf("expect %s\n", buf);
+    printf("expected: %s\n", buf);
 
     job_destroy(job);
     json_value_free(actual);
@@ -261,7 +356,7 @@ static result_t test_case_encode(unittest_case* expected) {
 }
 
 static result_t test_case_encode_status(unittest_case* expected) {
-    Job* job = job_create(VALID_ID, false);
+    Job* job = job_create(VALID_ID);
     Task* task = task_create(TASK_NAME);
     job_add_task(job, task);
     json_value* actual = job_encode_status(job);
@@ -320,11 +415,16 @@ Unittest* test_job_create(const char* name) {
     unittest_add(ut, "job_run - with bug", test_case_bug,
         CASE_INT, &not_ready);
     
+    unittest_add(ut, "job_run - many bugs", test_case_many_bugs,
+        CASE_NONE, NULL);
+    
     unittest_add(ut, "job_run - parrallel", test_case_parallel,
         CASE_NONE, NULL);
     
-    unittest_add(ut, "job_run - many bugs", 
-        test_case_many_bugs, CASE_NONE, NULL);
+    unittest_add(ut, "job_run - repeat", test_case_repeat, CASE_NONE, NULL);
+
+    unittest_add(ut, "job_run - parrallel repeat", test_case_parallel_repeat,
+        CASE_NONE, NULL);
     
     int incomplete = JOB_INCOMPLETE;
     unittest_add(ut, "job_run - stop", test_case_stop,
@@ -333,8 +433,10 @@ Unittest* test_job_create(const char* name) {
     // Create expected job encoding
     json_value* obj = json_object_new(0);
     json_object_push_integer(obj, "id", VALID_ID);
+    json_object_push_string(obj, "execMode", "sequential");
+    json_object_push_string(obj, "runMode", "repeat");
     json_value* arr = json_array_new(3);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         json_value* task = json_object_new(0);
         json_object_push_string(task, "name", TASK_NAME);
         json_array_push(arr, task);
@@ -357,11 +459,14 @@ Unittest* test_job_create(const char* name) {
         CASE_JSON, ready);
     
     // Create expected job
-    Job* job = job_create(VALID_ID, false);
-    for (int i = 0; i < 3; i++) {
+    Job* job = job_create(VALID_ID);
+    for (int i = 0; i < 2; i++) {
         Task* task = task_create(TASK_NAME);
         job_add_task(job, task);
     }
+    job_opts_t opts = job_opts_default();
+    opts.run_mode = JOB_RUN_REPEAT;
+    job_set_opts(job, &opts);
     
     unittest_add(ut, "job_decode", test_case_decode, CASE_JOB, job);
 

@@ -1,10 +1,8 @@
-#ifndef _UNITTEST_H
-#define _UNITTEST_H
+#ifndef UNITTEST_H
+#define UNITTEST_H
 
 #include "blueprint.h"
 #include "json.h"
-
-#define BUFSIZE 256
 
 // Result macro
 #define RETURN_RESULT(result) switch((result)) { \
@@ -44,16 +42,12 @@ typedef struct {
 
 typedef result_t (*unittest_test)(unittest_case*);
 
-typedef struct _unittest {
-    int size;
-    int capacity;
-    unittest_test* tests;
-    unittest_case** cases;
-    char name[];
-} Unittest;
+typedef struct Unittest Unittest;
 
 Unittest* unittest_create(const char* name);
 void unittest_destroy(Unittest* ut);
+
+const char* unittest_get_name(Unittest* ut);
 
 int unittest_add(Unittest* ut, const char* name, unittest_test tc, 
     case_t type, void* expected);

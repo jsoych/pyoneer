@@ -14,9 +14,11 @@ static result_t test_case_wait(unittest_case* expected) {
         return UNITTEST_ERROR;
     }
     job_runner_wait(runner);
+    int actual = job_get_status(job);
     job_destroy(job);
     free(runner);
-    return UNITTEST_SUCCESS;
+    if(actual == expected->as.integer) return UNITTEST_SUCCESS;
+    return UNITTEST_FAILURE;
 }
 
 static result_t test_case_stop(unittest_case* expected) {
@@ -60,7 +62,7 @@ Unittest* test_job_runner_create(const char* name) {
 
     unittest_add(ut, "job_runner_wait", test_case_wait, CASE_NONE, NULL);
     unittest_add(ut, "job_runner_stop", test_case_stop, CASE_NONE, NULL);
-    unittest_add(ut, "job_runner_start", test_case_restart, CASE_NONE, NULL);
+    unittest_add(ut, "job_runner_restart", test_case_restart, CASE_NONE, NULL);
     unittest_add(ut, "job_runner_destroy", test_case_destory, CASE_NONE, NULL);
     
     return ut;

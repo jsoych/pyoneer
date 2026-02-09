@@ -5,9 +5,13 @@
 
 #include "engine.h"
 
+struct Engine {
+    JobRunner* job_runner;
+};
+
 /* engine_create: Creates a new engine. */
 Engine* engine_create(void) {
-    Engine* engine = malloc(sizeof(engine));
+    Engine* engine = malloc(sizeof(Engine));
     if (!engine) {
         perror("engine_create: malloc");
         return NULL;

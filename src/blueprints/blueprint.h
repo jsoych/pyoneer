@@ -9,8 +9,13 @@ typedef enum {
     BLUEPRINT_PROJECT
 } blueprint_t;
 
-// Blueprint
-typedef struct Blueprint Blueprint;
+typedef struct Blueprint {
+    blueprint_t kind;
+    union {
+        Job* job;
+        Project* project;
+    } as;
+} Blueprint;
 
 void blueprint_destroy(Blueprint* blueprint);
 

@@ -1,6 +1,6 @@
 MODULES := $(shell find $(SRC_DIR) -type d -depth 1)
 INCLUDE := $(patsubst %,-I%,$(MODULES))
-INCLUDE += -Iblueprints -Ipyoneers -Ishared
+INCLUDE += -Iapi -Iblueprints -Ipyoneers -Ishared
 
 API_SRCS := $(shell find api -name '*.c')
 API_OBJS := $(patsubst %.c,$(BUILD_DIR)/tests/%.o,$(API_SRCS))

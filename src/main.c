@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,19 +16,10 @@ static Server* SERVER = NULL;
 
 static void on_term(int signo) {
     (void)signo;
-    if (SERVER) {
-        // Must be signal-safe: set atomic stop flag + wake accept loop if needed
-        server_stop(SERVER);
-    }
+    if (SERVER) server_stop(SERVER);
 }
 
-/*
- * policy_init:
- * - Ignore SIGPIPE (Broken pipe becomes EPIPE from send()).
- * - SIGINT/SIGTERM request graceful shutdown.
- *
- * Returns 0 on success, -1 on error.
- */
+/* policy_init: Initializes the signal actions, given a server. */
 static int policy_init(Server* server) {
     if (!server) {
         errno = EINVAL;
@@ -243,11 +232,7 @@ int main(int argc, char* argv[]) {
         goto cleanup;
     }
 
-    /*
-     * Multiple endpoint design:
-     * - Always listen on TCP (k8s-friendly)
-     * - Optionally also listen on UNIX if cfg.unix_path is set
-     */
+    // Configure endpoints
     server_endpoint eps[2];
     size_t nep = 0;
 

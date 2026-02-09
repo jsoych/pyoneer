@@ -2,9 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <time.h>
 
 #include "logger.h"
+
+typedef struct Logger {
+    int level;
+    char* name;
+    pthread_mutex_t lock;
+} Logger;
 
 static const char* level_str(int level) {
     switch (level) {
@@ -64,6 +71,8 @@ void logger_destroy(Logger* logger) {
     pthread_mutex_destroy(&logger->lock);
     free(logger);
 }
+
+int logger_get_level(Logger* logger) { return logger->level; }
 
 int logger_log(Logger* logger, int level, const char* fmt, ...) {
     if (level < logger->level) return 0;

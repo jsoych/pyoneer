@@ -3,12 +3,12 @@
 
 #include "test_api.h"
 
-extern char* SOCKET_PATH;
-extern char* TOKEN;
+extern server_config* SCFG;
+extern Site* SITE;
 extern volatile sig_atomic_t sig_flag;
 
 static result_t test_case_create(unittest_case* expected) {
-    Logger* logger = logger_create(LOGGER_DEBUG, FORMAT);
+    Logger* logger = logger_create(LOGGER_DEBUG, NAME);
     if (!logger) {
         return UNITTEST_ERROR;
     }
@@ -17,7 +17,7 @@ static result_t test_case_create(unittest_case* expected) {
         logger_destroy(logger);
         return UNITTEST_ERROR;
     }
-    Server* server = server_create(pyoneer, logger, SOCKET_PATH, TOKEN);
+    Server* server = server_create(pyoneer, logger, SCFG);
     if (!server) {
         return UNITTEST_FAILURE;
     }
@@ -27,7 +27,7 @@ static result_t test_case_create(unittest_case* expected) {
 
 static result_t test_case_destroy(unittest_case* expected) {
     server_destroy(NULL);
-    Logger* logger = logger_create(LOGGER_DEBUG, FORMAT);
+    Logger* logger = logger_create(LOGGER_DEBUG, NAME);
     if (!logger) {
         return UNITTEST_ERROR;
     }
@@ -36,7 +36,7 @@ static result_t test_case_destroy(unittest_case* expected) {
         logger_destroy(logger);
         return UNITTEST_ERROR;
     }
-    Server* server = server_create(pyoneer, logger, SOCKET_PATH, TOKEN);
+    Server* server = server_create(pyoneer, logger, SCFG);
     if (!server) {
         return UNITTEST_FAILURE;
     }
@@ -46,10 +46,10 @@ static result_t test_case_destroy(unittest_case* expected) {
 }
 
 static result_t test_case_run(unittest_case* expected) {
-    Logger* logger = logger_create(LOGGER_DEBUG, FORMAT);
+    Logger* logger = logger_create(LOGGER_DEBUG, NAME);
     Pyoneer* pyoneer = pyoneer_create(PYONEER_WORKER, WORKER_ID);
-    Server* server = server_create(pyoneer, logger, SOCKET_PATH, TOKEN);
-    if (server_start(server) != 0) {
+    Server* server = server_create(pyoneer, logger, SCFG);
+    if (server_run(server) != 0) {
         server_destroy(server);
         return UNITTEST_FAILURE;
     }

@@ -1,7 +1,3 @@
-#include "client.h"
-
-#define _POSIX_C_SOURCE 200809L
-
 #include <errno.h>
 #include <inttypes.h>
 #include <netdb.h>
@@ -21,8 +17,6 @@
 #include "json-builder.h"
 #include "json-helpers.h"
 
-/* If you have these error strings in server.c today, keep them centralized.
- * For now we replicate minimal ones here. */
 static const char* const API_ERR_MSG[] = {
     [ERR_INTERNAL]      = "API: internal error",
     [ERR_SHUTTING_DOWN] = "API: shutting down",
@@ -155,8 +149,7 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
                 c.conn_id, c.peer, c.msgs, c.bytes_in, c.bytes_out
             );
             break;
-        }
-        if (nbytes < 0) {
+        } else if (nbytes < 0) {
             logger_warnf(logger,
                 "conn=%d close peer=%s reason=RECV_ERR err=%s msgs=%" PRIu64 " bytes_in=%" PRIu64 "B bytes_out=%" PRIu64 "B",
                 c.conn_id, c.peer, strerror(errno), c.msgs, c.bytes_in, c.bytes_out
@@ -177,18 +170,19 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             c.conn_id, r.seq, r.in_bytes
         );
 
-        /* Create response object */
+        // Create response object
         json_value* resp = json_object_new(0);
         if (!resp) {
             logger_errorf(logger,
                 "conn=%d seq=%" PRIu64 " event=internal_err err=RESP_ALLOC_FAILED",
                 c.conn_id, r.seq
             );
-            // fatal for this connection
+            snprintf(buf, BUFLEN, "{\"Error\":%s}", API_ERR_MSG[ERR_INTERNAL]);
+            send(client_fd, buf, strlen(buf), 0);
             break;
         }
 
-        /* Parse request */
+        // Parse request
         json_value* req = json_parse_ex(&settings, buf, (size_t)nbytes, jerr);
         if (!req) {
             logger_warnf(logger,
@@ -208,7 +202,7 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             goto send_resp;
         }
 
-        /* command */
+        // Get command
         json_value* cmd = json_object_get_value(req, "command");
         if (!cmd || cmd->type != json_string) {
             logger_warnf(logger,
@@ -225,7 +219,7 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             c.conn_id, r.seq, r.cmd
         );
 
-        /* token */
+        // Get token
         json_value* tok = json_object_get_value(req, "token");
         if (!tok || tok->type != json_string) {
             logger_warnf(logger,
@@ -245,13 +239,13 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             goto send_resp;
         }
 
-        r.user = "authed"; // later: map token -> user id
+        r.user = "authed";
         logger_debugf(logger,
             "conn=%d seq=%" PRIu64 " event=auth_ok user=%s",
             c.conn_id, r.seq, r.user
         );
 
-        /* Dispatch (your existing command logic) */
+        // Run Command
         if (strcmp(r.cmd, "run") == 0) {
             Blueprint* blueprint = pyoneer_blueprint_decode(pyoneer, req);
             if (!blueprint) {
@@ -260,10 +254,14 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             }
             json_value* status = pyoneer->run(pyoneer, blueprint);
             json_object_push(resp, "pyoneer", status);
-        } else if (strcmp(r.cmd, "get_status") == 0) {
+        }
+
+        else if (strcmp(r.cmd, "get_status") == 0) {
             json_value* status = pyoneer->get_status(pyoneer);
             json_object_push(resp, "pyoneer", status);
-        } else if (strcmp(r.cmd, "assign") == 0) {
+        }
+
+        else if (strcmp(r.cmd, "assign") == 0) {
             Blueprint* blueprint = pyoneer_blueprint_decode(pyoneer, req);
             if (!blueprint) {
                 json_object_push_string(resp, "Error", API_ERR_MSG[ERR_BLUEPRINT]);
@@ -271,14 +269,21 @@ void client_handle_fd(Server* server, int client_fd, int listener_index) {
             }
             json_value* status = pyoneer->assign(pyoneer, blueprint);
             json_object_push(resp, "pyoneer", status);
-        } else if (strcmp(r.cmd, "restart") == 0) {
+        }
+        
+        else if (strcmp(r.cmd, "restart") == 0) {
             pyoneer->restart(pyoneer);
-            // empty response {}
-        } else if (strcmp(r.cmd, "start") == 0) {
+        }
+        
+        else if (strcmp(r.cmd, "start") == 0) {
             pyoneer->start(pyoneer);
-        } else if (strcmp(r.cmd, "stop") == 0) {
+        }
+        
+        else if (strcmp(r.cmd, "stop") == 0) {
             pyoneer->stop(pyoneer);
-        } else {
+        }
+        
+        else {
             json_object_push_string(resp, "Error", API_ERR_MSG[ERR_CMD]);
         }
 
@@ -290,8 +295,7 @@ send_resp:
                 "conn=%d seq=%" PRIu64 " event=internal_err err=RESP_TOO_LARGE cmd=%s",
                 c.conn_id, r.seq, r.cmd ? r.cmd : "?"
             );
-            strncpy(buf, "{\"Error\":\"api failure\"}", BUFLEN);
-            buf[BUFLEN] = '\0';
+            snprintf(buf, BUFLEN, "{\"Error\":%s}", API_ERR_MSG[ERR_INTERNAL]);
         } else {
             json_serialize(buf, resp);
         }

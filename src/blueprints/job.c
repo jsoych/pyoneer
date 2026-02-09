@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "job.h"
 #include "json-builder.h"
@@ -13,7 +14,9 @@ struct Job {
     int id;
     int status;
     int size;
-    bool parallel;
+
+    job_opts_t opts;
+
     job_node* head;
     job_node* tail;
 };
@@ -21,15 +24,19 @@ struct Job {
 struct JobRunner {
     Job* job;
     Site* job_site;
+
     pthread_t job_tid;
-    void* (*job_thread)(void*);
+
+    job_runner_info_t info;
+
     int task_count;
+    int task_capacity;
     TaskRunner* task_runners[];
 };
 
 /* job_create: Creates a new job and returns it, if the id is positive
     (id > 0). Otherwise, returns NULL. */
-Job* job_create(int id, bool parallel) {
+Job* job_create(int id) {
     if (id <= 0) return NULL;
 
     // Create new job
@@ -42,7 +49,7 @@ Job* job_create(int id, bool parallel) {
     job->id = id;
     job->status = JOB_READY;
     job->size = 0;
-    job->parallel = parallel;
+    job->opts = job_opts_default();
     job->head = NULL;
     job->tail = NULL;
     return job;
@@ -61,11 +68,15 @@ void job_destroy(Job *job) {
     free(job);
 }
 
-/* update_status: Updates the job status. The job is running, not ready or 
-    incomplete, if one its tasks is running, not ready or incomplete, and
-    is completed if all of its tasks are completed. Lastly, a job is ready
-    when all of its tasks are completed and there is at least one ready
-    task. */
+/* update_status: Derives job status from the statuses of all its tasks.
+ *
+ * Priority order:
+ *   RUNNING     if any task is running
+ *   NOT_READY   if any task is not ready
+ *   INCOMPLETE  if any task is incomplete
+ *   READY       if any task is ready
+ *   COMPLETED   otherwise (all tasks completed)
+ */
 static void update_status(Job* job) {
     if (job->size == 0) return;
 
@@ -100,16 +111,32 @@ static void update_status(Job* job) {
                     /* all tasks are completed */     JOB_COMPLETED;
 }
 
-/* job_get_id: Gets the job id and returns it. Otherwise, returns -1. */
-int job_get_id(Job* job) {
-    if (!job) return -1;
-    return job->id;
-}
+/* job_get_id: Gets the id and returns it. */
+int job_get_id(Job* job) { return job->id; }
 
-/* job_get_status: Gets the updated status of the job. */
+/* job_get_size: Gets the size and returns it. */
+int job_get_size(Job* job) { return job->size; }
+
+/* job_get_status: Updates the job status and returns it. */
 int job_get_status(Job* job) {
     update_status(job);
     return job->status;
+}
+
+/* job_get_tasks: Gets the tasks and returns the head of the linked-list. */
+job_node* job_get_tasks(Job* job) { return job->head; }
+
+/* job_set_opts: Sets the run and execute options. */
+void job_set_opts(Job* job, const job_opts_t* opts) {
+    job_opts_t o = job_opts_default();
+
+    if (opts) {
+        size_t n = opts->size < sizeof(o) ? opts->size : sizeof(o);
+        memcpy(&o, opts, n);
+        o.size = sizeof(o);
+    }
+
+    job->opts = o;
 }
 
 /* job_add_task: Adds the task to the job and returns 0, if the task is
@@ -145,6 +172,24 @@ json_value* job_status_map(int status) {
     }
 }
 
+/* job_exec_mode_map: Maps execution mode codes to a string. */
+const char* job_exec_mode_map(job_exec_mode_t mode) {
+    switch (mode) {
+        case JOB_EXEC_PARALLEL:     return "parallel";
+        case JOB_EXEC_SEQUENTIAL:   return "sequential";
+        default:                    return "";
+    }
+}
+
+/* job_run_mode_map: Maps run mode codes to a string. */
+const char* job_run_mode_map(job_run_mode_t mode) {
+    switch (mode) {
+        case JOB_RUN_ONCE:      return "once";
+        case JOB_RUN_REPEAT:    return "repeat";
+        default:                return "";
+    }
+}
+
 /* job_encode_status: Encode the job status. */
 json_value* job_encode_status(Job* job) {
     json_value* obj = json_object_new(0);
@@ -155,7 +200,8 @@ json_value* job_encode_status(Job* job) {
     job_node* curr = job->head;
     while (curr) {
         json_value* task_status = task_encode_status(curr->task);
-        json_object_push_string(task_status, "name", curr->task->name);
+        json_object_push_string(task_status, "name",
+            task_get_name(curr->task));
         json_array_push(tasks, task_status);
         curr = curr->next;
     }
@@ -169,6 +215,12 @@ json_value* job_encode(const Job *job) {
     if (!obj) return NULL;
     json_object_push_integer(obj, "id", job->id);
 
+    // Add options
+    const char* mode = job_exec_mode_map(job->opts.exec_mode);
+    json_object_push_string(obj, "execMode", mode);
+    mode = job_run_mode_map(job->opts.run_mode);
+    json_object_push_string(obj, "runMode", mode);
+
     // Add tasks
     json_value* arr = json_array_new(0);
     job_node *curr = job->head;
@@ -177,36 +229,61 @@ json_value* job_encode(const Job *job) {
         json_array_push(arr, val);
         curr = curr->next;
     }
-
     json_object_push(obj, "tasks", arr);
+
     return obj;
 }
 
-/* job_decode: Decodes the JSON object into a new job. */
+/* job_decode: Decodes the JSON object into a new job and returns it.
+    Otherwise, returns NULL. */
 Job* job_decode(const json_value* obj) {
-    json_value* id = json_object_get_value(obj, "id");
+    if (!obj || obj->type != json_object) return NULL;
+
+    json_value* id    = json_object_get_value(obj, "id");
     json_value* tasks = json_object_get_value(obj, "tasks");
-    if (id == NULL || tasks == NULL) return NULL;
+    if (!id || !tasks) return NULL;
     if (id->type != json_integer || tasks->type != json_array) return NULL;
 
-    bool parallel = false;
-    json_value* val = json_object_get_value(obj, "parallel");
-    if (val && val->type == json_boolean) parallel = val->u.boolean;
+    Job* job = job_create(id->u.integer);
+    if (!job) return NULL;
 
-    Job* job = job_create(id->u.integer, parallel);
+    job_opts_t opts = job_opts_default();
+
+    json_value* v = json_object_get_value(obj, "execMode");
+    if (v && v->type == json_string) {
+        const char* s = v->u.string.ptr;
+        if (strcmp(s, "parallel") == 0) opts.exec_mode = JOB_EXEC_PARALLEL;
+        else if (strcmp(s, "sequential") == 0) opts.exec_mode = JOB_EXEC_SEQUENTIAL;
+    }
+
+    v = json_object_get_value(obj, "runMode");
+    if (v && v->type == json_string) {
+        const char* s = v->u.string.ptr;
+        if (strcmp(s, "repeat") == 0) opts.run_mode = JOB_RUN_REPEAT;
+        else if (strcmp(s, "once") == 0) opts.run_mode = JOB_RUN_ONCE;
+    }
+
+    job_set_opts(job, &opts);
+
     for (unsigned int i = 0; i < tasks->u.array.length; i++) {
         Task* task = task_decode(tasks->u.array.values[i]);
-        if (!task) {
-            job_destroy(job);
-            return NULL;
-        }
+        if (!task) { job_destroy(job); return NULL; }
         if (job_add_task(job, task) == -1) {
             task_destroy(task);
             job_destroy(job);
             return NULL;
         }
     }
+
     return job;
+}
+
+static void reset_status(Job* job) {
+    job_node* curr = job->head;
+    while (curr) {
+        task_set_status(curr->task, TASK_READY);
+        curr = curr->next;
+    }
 }
 
 static void job_runner_handler(void* arg) {
@@ -217,26 +294,51 @@ static void job_runner_handler(void* arg) {
 
 static void* job_thread_parallel(void* arg) {
     JobRunner* runner = (JobRunner*)arg;
-    // Run tasks in parallel
-    job_node* curr = runner->job->head;
-    while (curr) {
-        int status = task_get_status(curr->task);
-        if (status == TASK_READY || status == TASK_INCOMPLETE) {
-            TaskRunner* task_runner = task_run(curr->task, runner->job_site);
-            if (!task_runner)
-                runner->task_runners[runner->task_count++] = task_runner;
-        }
-        
-        // Inconsistent state
-        if (status == TASK_NOT_READY || status == TASK_RUNNING) break;
-        curr = curr->next;
-    }
+    bool repeat = runner->job->opts.run_mode == JOB_RUN_REPEAT;
+    
+    do {
+        runner->info.attempts++;
+        runner->task_count = 0;
+        bool completion = true;
 
-    // Wait for tasks and cleanup task runners
-    pthread_cleanup_push(job_runner_handler, runner);
-    for (int i = 0; i < runner->task_count; i++)
-        task_runner_wait(runner->task_runners[i]);
-    pthread_cleanup_pop(1);
+        // Run Tasks
+        pthread_cleanup_push(job_runner_handler, runner);
+        for (job_node* curr = runner->job->head; curr; curr = curr->next) {
+            int status = task_get_status(curr->task);
+            if (status == TASK_READY || status == TASK_INCOMPLETE) {
+                TaskRunner* task_runner = task_run(curr->task, runner->job_site);
+                if (!task_runner) {
+                    completion = false;
+                    repeat = false;
+                    break;
+                }
+                runner->task_runners[runner->task_count++] = task_runner;
+            }
+            
+            // Inconsistent state
+            if (status == TASK_NOT_READY || status == TASK_RUNNING) {
+                completion = false;
+                repeat = false;
+                break;
+            }
+        }
+
+        // Wait for tasks and cleanup task runners
+        for (int i = 0; i < runner->task_count; i++)
+            task_runner_wait(runner->task_runners[i]);
+        pthread_cleanup_pop(1);
+        
+        // Update info
+        if (completion)
+            runner->info.completions++;
+        
+        if (completion && job_get_status(runner->job) == JOB_COMPLETED)
+            runner->info.successes++;
+        
+        if (completion && repeat)
+            reset_status(runner->job);
+    } while (repeat);
+    
     pthread_exit(NULL);
 }
 
@@ -245,25 +347,97 @@ static void task_runner_handler(void* arg) {
     task_runner_destroy(runner);
 }
 
-static void* job_thread(void* arg) {
+static void* job_thread_sequential(void* arg) {
     JobRunner* runner = (JobRunner*)arg;
-    // Run tasks
-    job_node* curr = runner->job->head;
-    while (curr) {
-        int status = task_get_status(curr->task);
-        if (status == TASK_READY || status == TASK_INCOMPLETE) {
-            TaskRunner* task_runner = task_run(curr->task, runner->job_site);
-            if (!task_runner) break;     
-            pthread_cleanup_push(task_runner_handler, task_runner);
-            task_runner_wait(task_runner);
-            pthread_cleanup_pop(1);
+    bool repeat = runner->job->opts.run_mode == JOB_RUN_REPEAT;
+
+    do {
+        runner->info.attempts++;
+        runner->task_count = 0;
+        bool completion = true;
+
+        // Run tasks
+        for (job_node* curr = runner->job->head; curr; curr = curr->next) {
+            int status = task_get_status(curr->task);
+            if (status == TASK_READY || status == TASK_INCOMPLETE) {
+                TaskRunner* task_runner = task_run(curr->task, runner->job_site);
+                if (!task_runner) {
+                    completion = false;
+                    repeat = false;
+                    break;
+                }
+                pthread_cleanup_push(task_runner_handler, task_runner);
+                task_runner_wait(task_runner);
+                pthread_cleanup_pop(1);
+            }
+            
+            // Inconsistent state
+            if (status == TASK_NOT_READY || status == TASK_RUNNING) {
+                completion = false;
+                repeat = false;
+                break;
+            }
         }
+
+        if (completion)
+            runner->info.completions++;
         
-        // Inconsistent state
-        if (status == TASK_NOT_READY || status == TASK_RUNNING) break;
-        curr = curr->next;
-    }
+        if (completion && job_get_status(runner->job) == JOB_COMPLETED)
+            runner->info.successes++;
+        
+        if (completion && repeat)
+            reset_status(runner->job);
+    } while (repeat);
+
     pthread_exit(NULL);
+}
+
+static int job_thread_create(JobRunner* runner) {
+    int err;
+    int mode = runner->job->opts.exec_mode;
+
+    switch (mode) {
+        case JOB_EXEC_PARALLEL:
+            err = pthread_create(&runner->job_tid, NULL,
+                                 job_thread_parallel, runner);
+            break;
+        case JOB_EXEC_SEQUENTIAL:
+            err = pthread_create(&runner->job_tid, NULL,
+                                 job_thread_sequential, runner);
+            break;
+        default:
+            fprintf(stderr,
+                    "job_thread_create: unexpected exec mode (%d)\n", mode);
+            return EINVAL;
+    }
+
+    if (err != 0) {
+        fprintf(stderr,
+                "job_thread_create: pthread_create: %s\n",
+                strerror(err));
+    }
+
+    return err;
+}
+
+
+/* job_run_opts_default: Returns the default run options. */
+job_opts_t job_opts_default() {
+    return (job_opts_t){
+        .size = sizeof(job_opts_t),
+        .exec_mode = JOB_EXEC_SEQUENTIAL,
+        .run_mode = JOB_RUN_ONCE
+    };
+}
+
+/* job_runner_info_defaults: Returns the default runner info. */
+static job_runner_info_t job_runner_info_defaults() {
+    return (job_runner_info_t){
+        .size = sizeof(job_runner_info_t),
+        .attempts = 0,
+        .completions = 0,
+        .successes = 0
+    };
 }
 
 /* job_run: Runs the job and returns a new job runner. */
@@ -277,31 +451,31 @@ JobRunner* job_run(Job* job, Site* site) {
     }
     runner->job = job;
     runner->job_site = site;
-    runner->job_thread = (job->parallel) ? job_thread_parallel : job_thread;
+
+    runner->info = job_runner_info_defaults();
+
     runner->task_count = 0;
+    runner->task_capacity = job->size;
     
     // Create job runner
-    int err = pthread_create(&runner->job_tid, NULL,
-        runner->job_thread, runner);
+    int err = job_thread_create(runner);
     if (err != 0) {
-        fprintf(stderr, "job_run: pthread_create: %s", strerror(err));
         free(runner);
         return NULL;
     }
     return runner;
 }
 
+/* job_runner_get_info: Gets the runner info. */
+job_runner_info_t job_runner_get_info(JobRunner* runner) {
+    return runner->info;
+}
+
 /* job_runner_start: Starts the job. */
 void job_runner_restart(JobRunner* runner) {
     pthread_cancel(runner->job_tid);
     pthread_join(runner->job_tid, NULL);
-    int err = pthread_create(&runner->job_tid, NULL,
-        runner->job_thread, runner);
-    if (err != 0) {
-        fprintf(stderr, "job_runner_start: pthread_create: %s\n",
-            strerror(err));
-        return;
-    }
+    job_thread_create(runner);
 }
 
 /* job_runner_stop: Stops the job. */

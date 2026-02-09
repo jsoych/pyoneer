@@ -10,16 +10,15 @@ extern Site* SITE;
 
 // Test Cases
 static result_t test_case_create(unittest_case* expected) {
-    Task* actual = task_create(SHORT_NAME);
-    if (!actual) return UNITTEST_FAILURE;
+    Task* task = task_create(SHORT_NAME);
+    if (!task) return UNITTEST_FAILURE;
     // Check properties
-    if (actual->status != TASK_READY ||
-        actual->exit_code != EXIT_SENTINAL ||
-        actual->exit_signo != SIGSENT) {
-        task_destroy(actual);
+    if (task_get_status(task) != TASK_READY ||
+        strcmp(task_get_name(task), SHORT_NAME) != 0) {
+        task_destroy(task);
         return UNITTEST_FAILURE;
     }
-    task_destroy(actual);
+    task_destroy(task);
     return UNITTEST_SUCCESS;
 }
 
@@ -27,6 +26,17 @@ static result_t test_case_destroy(unittest_case* expected) {
     // Check NULL
     task_destroy(NULL);
     Task* task = task_create(SHORT_NAME);
+    task_destroy(task);
+    return UNITTEST_SUCCESS;
+}
+
+static result_t test_case_status(unittest_case* expected) {
+    Task* task = task_create(SHORT_NAME);
+    task_set_status(task, TASK_NOT_READY);
+    if (task_get_status(task) != TASK_NOT_READY) {
+        task_destroy(task);
+        return UNITTEST_FAILURE;
+    }
     task_destroy(task);
     return UNITTEST_SUCCESS;
 }
@@ -104,7 +114,7 @@ static result_t test_case_decode(unittest_case* expected) {
         json_value_free(obj);
         return UNITTEST_FAILURE;
     }
-    int result = strcmp(task->name, SHORT_NAME);
+    int result = strcmp(task_get_name(task), SHORT_NAME);
     json_value_free(obj);
     task_destroy(task);
     RETURN_RESULT(result);

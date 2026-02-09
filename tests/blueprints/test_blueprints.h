@@ -6,6 +6,7 @@
 
 // Task names
 #define TASK_NAME "task.py"
+#define BUFSIZE 1024
 #define BUG_NAME "bug.py"
 #define WRITE_NAME "write.py"
 #define SHORT_NAME "task.py"

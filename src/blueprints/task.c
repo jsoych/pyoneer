@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <string.h>
@@ -11,6 +12,21 @@
 #include "json-helpers.h"
 
 extern char** environ;
+
+struct Task {
+    int status;
+    char* name;
+};
+
+struct TaskRunner {
+    Task* task;
+    Site* site;
+
+    task_runner_info_t info;
+
+    pthread_t task_thread;
+    pid_t task_tid;
+};
 
 /* task_create: Creates a new task. */
 Task* task_create(const char* name) {
@@ -23,8 +39,6 @@ Task* task_create(const char* name) {
         return NULL;
     }
     task->status = TASK_READY;
-    task->exit_code = EXIT_SENTINAL;
-    task->exit_signo = SIGSENT;
     task->name = strdup(name);
     return task;
 }
@@ -36,29 +50,6 @@ void task_destroy(Task *task) {
     free(task);
 }
 
-/* update_status: Updates the task status. */
-static void update_status(Task* task) {
-    switch (task->exit_code) {
-        case EXIT_SENTINAL:
-            break;
-        case EXIT_SYSCALL:
-            task->status = TASK_READY;
-            return;
-        case EXIT_SUCCESS:
-            task->status = TASK_COMPLETED;
-            return;
-        case EXIT_FAILURE:
-            task->status = TASK_NOT_READY;
-            return;
-    }
-
-    switch (task->exit_signo) {
-        case SIGINT:
-            task->status = TASK_INCOMPLETE;
-            return;
-    }
-}
-
 /* task_get_name: Gets the name of the task. */
 const char* task_get_name(Task* task) {
     if (!task) return "";
@@ -66,9 +57,28 @@ const char* task_get_name(Task* task) {
 }
 
 /* task_get_status: Get the task status and returns it. */
-int task_get_status(Task* task) {
-    update_status(task);
-    return task->status;
+int task_get_status(Task* task) { return task->status; }
+
+/* task_set_status: Sets the task status. */
+void task_set_status(Task* task, int status) { task->status = status; }
+
+/* update_status: Updates the task status. */
+static void update_status(TaskRunner* runner, int status) {
+    if (WIFEXITED(status)) {
+        if ((runner->info.exit_code = WEXITSTATUS(status)) == EXIT_SUCCESS) {
+            task_set_status(runner->task, TASK_COMPLETED);
+        } else {
+            task_set_status(runner->task, TASK_NOT_READY);
+        }
+    }
+
+    else if (WIFSIGNALED(status)) {
+        if ((runner->info.signo = WTERMSIG(status)) == SIGINT) {
+            task_set_status(runner->task, TASK_INCOMPLETE);
+        } else {
+            task_set_status(runner->task, TASK_READY);
+        }
+    }
 }
 
 static void task_runner_handler(void* arg) {
@@ -76,14 +86,7 @@ static void task_runner_handler(void* arg) {
     int status;
     kill(runner->task_tid, SIGINT);
     waitpid(runner->task_tid, &status, 0);
-    if (WIFEXITED(status)) {
-        runner->task->exit_code = WEXITSTATUS(status);
-        runner->task->exit_signo = SIGSENT;
-    }
-    else if (WIFSIGNALED(status)) {
-        runner->task->exit_code = EXIT_SENTINAL;
-        runner->task->exit_signo = WTERMSIG(status);
-    }
+    update_status(runner, status);
 }
 
 /* task_runner_thread: Runs the task and waits for it to complete. */
@@ -122,14 +125,7 @@ static void* task_runner_thread(void* arg) {
     pthread_cleanup_push(task_runner_handler, runner);
     int status;
     waitpid(runner->task_tid, &status, 0);
-    if (WIFEXITED(status)) {
-        runner->task->exit_code = WEXITSTATUS(status);
-        runner->task->exit_signo = SIGSENT;
-    }
-    else if (WIFSIGNALED(status)) {
-        runner->task->exit_code = EXIT_SENTINAL;
-        runner->task->exit_signo = WTERMSIG(status);
-    }
+    update_status(runner, status);
     pthread_cleanup_pop(0);
     pthread_exit(NULL);
 }
@@ -145,6 +141,8 @@ TaskRunner* task_run(Task* task, Site* site) {
     }
     runner->task = task;
     runner->site = site;
+    runner->info.exit_code = EXIT_SENTINAL;
+    runner->info.signo = SIGSENT;
     
     // Create task thread
     int err = pthread_create(&runner->task_thread, NULL,
@@ -154,7 +152,13 @@ TaskRunner* task_run(Task* task, Site* site) {
         free(runner);
         return NULL;
     }
+    task_set_status(task, TASK_RUNNING);
     return runner;
+}
+
+/* task_runner_get_info: Gets the runner saved exit code and signal number. */
+task_runner_info_t task_runner_get_info(TaskRunner* runner) {
+    return runner->info;
 }
 
 /* task_runner_restart: Restarts the task runner. */

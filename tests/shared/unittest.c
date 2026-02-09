@@ -6,7 +6,16 @@
 
 #include "unittest.h"
 
+#define BUFSIZE 256
 #define CAPACITY 8
+
+struct Unittest {
+    int size;
+    int capacity;
+    unittest_test* tests;
+    unittest_case** cases;
+    char name[];
+};
 
 /* unittest_create: Creates a new unittest. */
 Unittest* unittest_create(const char* name) {
@@ -71,6 +80,11 @@ void unittest_destroy(Unittest* ut) {
         free(args);
     }
     free(ut);
+}
+
+/* unittest_get_name: Gets the test name and returns a reference to it. */
+const char* unittest_get_name(Unittest* ut) {
+    return ut->name;
 }
 
 /* unittest_add: Adds a new test case to the unittest. */
@@ -378,7 +392,8 @@ int unittest_run(Unittest* ut) {
 int unittest_compare_task(const Task* a, const Task* b) {
     if (a == b) return 0;
     if (a == NULL || b == NULL) return 1;
-    if (a->status == b->status && strcmp(a->name, a->name) == 0)
+    if (task_get_status(a) == task_get_status(b) &&
+        strcmp(task_get_name(a), task_get_name(b)) == 0)
         return 0;
     return 1;
 }
@@ -386,19 +401,9 @@ int unittest_compare_task(const Task* a, const Task* b) {
 int unittest_compare_job(const Job* a, const Job* b) {
     if (a == b) return 0;
     if (a == NULL || b == NULL) return 1;
-    if (a->id != b->id || a->status != b->status ||
-        a->size != b->size) return 1;
-    
-    // Compare tasks
-    job_node* cura = a->head;
-    job_node* curb = b->head;
-    while (cura && curb) {
-        if (unittest_compare_task(cura->task, curb->task)) return 1;
-        cura = cura->next;
-        curb = curb->next;
-    }
-
-    if (cura != curb) return -1;
+    if (job_get_id(a) != job_get_id(b) ||
+        job_get_status(a) != job_get_status(b) ||
+        job_get_size(a) != job_get_size(b)) return 1;
     return 0;
 }
 
@@ -406,7 +411,7 @@ int unittest_compare_job(const Job* a, const Job* b) {
     nbugs added to the job. */
 Job* unittest_job_create(int id, const char* task_name, int ntasks, 
     const char* bug_name, int nbugs) {
-    Job* job = job_create(id, false);
+    Job* job = job_create(id);
     for (int i = 0; i < ntasks; i++) {
         Task* task = task_create(task_name);
         job_add_task(job, task);
@@ -420,4 +425,5 @@ Job* unittest_job_create(int id, const char* task_name, int ntasks,
     return job;
 }
 
+#undef BUFSIZE
 #undef CAPACITY

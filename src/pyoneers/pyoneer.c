@@ -9,21 +9,21 @@
 static json_value* pyoneer_worker_get_status(Pyoneer* pyoneer) {
     json_value* status = worker_get_status(pyoneer->as.worker);
     json_object_push_string(status, "role", "worker");
-    json_object_push_integer(status, "id", pyoneer->as.worker->id);
+    json_object_push_integer(status, "id", worker_get_id(pyoneer->as.worker));
     return status;
 }
 
 static json_value* pyoneer_run_job(Pyoneer* pyoneer, Blueprint* blueprint) {
     json_value* status = worker_run(pyoneer->as.worker, blueprint->as.job);
     json_object_push_string(status, "role", "worker");
-    json_object_push_integer(status, "id", pyoneer->as.worker->id);
+    json_object_push_integer(status, "id", worker_get_id(pyoneer->as.worker));
     return status;
 }
 
 static json_value* pyoneer_assign_job(Pyoneer* pyoneer, Blueprint* blueprint) {
     json_value* status = worker_assign(pyoneer->as.worker, blueprint->as.job);
     json_object_push_string(status, "role", "worker");
-    json_object_push_integer(status, "id", pyoneer->as.worker->id);
+    json_object_push_integer(status, "id", worker_get_id(pyoneer->as.worker));
     return status;
 }
 

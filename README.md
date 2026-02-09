@@ -26,7 +26,7 @@ To avoid confusion with the name of the distributed system, we use:
 
 - The state of the distributed system is modelled as a **cartesian product** of each agent and resource state. 
   - *Informally:* the state of Pyoneer is the status of each pyoneer and its blueprint, and state transitions are pyoneers working on their assigned blueprints.
-  - *Formally:* Let $V$ and $W$ denote the sets of all agent and resource states respectively. Then $Q = \overbrace{V \times W \times \cdots \times V \times W}^{2n}$, where $n$ denotes the number of agents and resources in the distributed system.
+  - *Formally:* Let $V$ and $W$ denote the sets of all agent and resource states respectively. Then the set of states is $\overbrace{V \times W \times \cdots \times V \times W}^{2n}$, where $n$ denotes the number of agents and resources in the distributed system.
 
 - There is a **1-to-1 relationship** between pyoneers and blueprints in the system.  
   - *Example:* a worker is assigned a job and a job is completed by a worker.
@@ -61,3 +61,5 @@ To avoid confusion with the name of the distributed system, we use:
 - Managers communicate with workers, and workers communicate with the runtime engine. Workers do **not** communicate with other workers.
 
 - Workers are **lazy** and idle after completing a job.
+
+- Objects are opaque.  

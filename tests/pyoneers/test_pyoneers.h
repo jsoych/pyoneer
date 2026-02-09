@@ -5,6 +5,7 @@
 #include "suite.h"
 #include "unittest.h"
 
+#define BUFSIZE 4096
 #define TASK_NAME "task.py"
 #define BUG_NAME "bug.py"
 #define JOB_ID 33

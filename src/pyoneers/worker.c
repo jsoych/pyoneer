@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,8 +8,17 @@
 #include <sys/wait.h>
 
 #include "worker.h"
+#include "engine.h"
 #include "json-builder.h"
 #include "json-helpers.h"
+
+struct Worker {
+    int id;
+    int status;
+    Job* job;
+    Engine* engine;
+    pthread_mutex_t lock;
+};
 
 #define Pthread_mutex_lock(lock) ({ \
     int _err = pthread_mutex_lock(lock); \
@@ -63,6 +73,9 @@ void worker_destroy(Worker *worker) {
     free(worker);
 }
 
+/* worker_get_id: Gets the worker id and returns it. */
+int worker_get_id(Worker* worker) { return worker->id; }
+
 /* update_status: Updates the workers status. */
 static void update_status(Worker* worker) {
     if (!worker->job) {
@@ -99,7 +112,7 @@ static json_value* get_status(Worker* worker) {
     }
 
     json_value* job_status = job_encode_status(worker->job);
-    json_object_push_integer(job_status, "id", worker->job->id);
+    json_object_push_integer(job_status, "id", job_get_id(worker->job));
     json_object_push(obj, "job", job_status);
     return obj;
 }

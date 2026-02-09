@@ -5,26 +5,36 @@
 #include "suite.h"
 #include "test_api.h"
 
-Site* SITE;
-char* SOCKET_PATH = NULL;
-char* TOKEN = NULL;
+Site* SITE = NULL;
+server_config* SCFG = NULL;
 
 int main() {
+    // define endpoint
+    server_endpoint eps[] = {
+    (server_endpoint){
+        .type = EP_UNIX,
+        .host = NULL,
+        .port = NULL,
+        .path = getenv("PYONEER_SOCKET_PATH"),
+        .backlog = 8}
+    };
+
+    server_config scfg = (server_config){
+        .endpoints = eps,
+        .nendpoints = 1,
+        .token = getenv("PYONEER_API_TOKEN")
+    };
+
+    SCFG = &scfg;
+
     SITE = site_create(
         getenv("PYONEER_PYTHON"),
         getenv("PYONEER_TASK_DIR"),
         getenv("PYONEER_WORKING_DIR")
     );
+
     if (!SITE) {
         fprintf(stderr, "main: Error: Missing environment variables\n");
-        exit(EXIT_FAILURE);
-    }
-
-    SOCKET_PATH = getenv("PYONEER_SOCKET_PATH");
-    TOKEN = getenv("PYONEER_API_TOKEN");
-    if (!SOCKET_PATH || !TOKEN) {
-        fprintf(stderr, "main: Error: Missing environment variables\n");
-        site_destroy(SITE);
         exit(EXIT_FAILURE);
     }
 

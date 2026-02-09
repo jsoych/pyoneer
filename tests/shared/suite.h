@@ -1,17 +1,11 @@
-#ifndef _SUITE_H
-#define _SUITE_H
+#ifndef SUITE_H
+#define SUITE_H
 
 #include "unittest.h"
 
-#define UNITTEST_RUN_ERROR 255
+typedef struct Suite Suite;
 
-typedef struct _suite {
-    int size;
-    int capacity;
-    Unittest** tests;
-} Suite;
-
-Suite* suite_create(int size);
+Suite* suite_create(int capacity);
 void suite_destroy(Suite* suite);
 
 int suite_add(Suite* suite, Unittest* ut);

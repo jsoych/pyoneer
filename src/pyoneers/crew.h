@@ -1,5 +1,5 @@
-#ifndef _CREW_H
-#define _CREW_H
+#ifndef CREW_H
+#define CREW_H
 
 #include <pthread.h>
 #include "json.h"
@@ -10,7 +10,7 @@
 #define CREW_MAXLEN 512
 
 // job structure
-typedef struct _crew_job {
+typedef struct crew_job {
     int id;
     int status;
 } crew_job;
@@ -23,12 +23,12 @@ typedef struct {
 } crew_worker;
 
 // crew node
-typedef struct _crew_node {
+typedef struct crew_node {
     crew_worker* worker;
-    struct _crew_node* next;
-    struct _crew_node* prev;
-    struct _crew_node* next_free;
-    struct _crew_node* prev_free;
+    struct crew_node* next;
+    struct crew_node* prev;
+    struct crew_node* next_free;
+    struct crew_node* prev_free;
     pthread_t tid;
 } crew_node;
 

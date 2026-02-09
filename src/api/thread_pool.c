@@ -1,6 +1,3 @@
-// thread_pool.c
-#define _POSIX_C_SOURCE 200809L
-
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -27,7 +24,7 @@ struct ThreadPool {
 
     int shutting_down;
 
-    pthread_mutex_t m;
+    pthread_mutex_t lock;
     pthread_cond_t not_empty;
     pthread_cond_t not_full;
 
@@ -54,16 +51,16 @@ static void* worker_thread(void* arg) {
     for (;;) {
         job j;
 
-        pthread_mutex_lock(&pool->m);
+        pthread_mutex_lock(&pool->lock);
 
         // Wait for work while not shutting down
         while (pool->qlen == 0 && !pool->shutting_down) {
-            pthread_cond_wait(&pool->not_empty, &pool->m);
+            pthread_cond_wait(&pool->not_empty, &pool->lock);
         }
 
         // If shutting down and no work remains, exit
         if (pool->qlen == 0 && pool->shutting_down) {
-            pthread_mutex_unlock(&pool->m);
+            pthread_mutex_unlock(&pool->lock);
             break;
         }
 
@@ -73,7 +70,7 @@ static void* worker_thread(void* arg) {
         // Wake any submitter waiting on "not_full"
         pthread_cond_signal(&pool->not_full);
 
-        pthread_mutex_unlock(&pool->m);
+        pthread_mutex_unlock(&pool->lock);
 
         // Handle the connection (worker owns fd until handler closes it)
         client_handle_fd(pool->server, j.fd, j.listener_index);
@@ -108,7 +105,7 @@ ThreadPool* thread_pool_create(size_t nworkers, size_t qcap, Server* server) {
     pool->shutting_down = 0;
     pool->server = server;
 
-    pthread_mutex_init(&pool->m, NULL);
+    pthread_mutex_init(&pool->lock, NULL);
     pthread_cond_init(&pool->not_empty, NULL);
     pthread_cond_init(&pool->not_full, NULL);
 
@@ -126,7 +123,7 @@ ThreadPool* thread_pool_create(size_t nworkers, size_t qcap, Server* server) {
                 pthread_join(pool->threads[j], NULL);
             }
 
-            pthread_mutex_destroy(&pool->m);
+            pthread_mutex_destroy(&pool->lock);
             pthread_cond_destroy(&pool->not_empty);
             pthread_cond_destroy(&pool->not_full);
 
@@ -142,21 +139,21 @@ ThreadPool* thread_pool_create(size_t nworkers, size_t qcap, Server* server) {
 }
 
 int thread_pool_submit(ThreadPool* pool, int client_fd, int listener_index) {
-    pthread_mutex_lock(&pool->m);
+    pthread_mutex_lock(&pool->lock);
 
     // If shutting down, reject immediately
     if (pool->shutting_down) {
-        pthread_mutex_unlock(&pool->m);
+        pthread_mutex_unlock(&pool->lock);
         return -1;
     }
 
     // Wait until there's space or shutdown begins
     while (pool->qlen == pool->qcap && !pool->shutting_down) {
-        pthread_cond_wait(&pool->not_full, &pool->m);
+        pthread_cond_wait(&pool->not_full, &pool->lock);
     }
 
     if (pool->shutting_down) {
-        pthread_mutex_unlock(&pool->m);
+        pthread_mutex_unlock(&pool->lock);
         return -1;
     }
 
@@ -164,16 +161,16 @@ int thread_pool_submit(ThreadPool* pool, int client_fd, int listener_index) {
     queue_push(pool, in);
 
     pthread_cond_signal(&pool->not_empty);
-    pthread_mutex_unlock(&pool->m);
+    pthread_mutex_unlock(&pool->lock);
     return 0;
 }
 
 void thread_pool_shutdown(ThreadPool* pool) {
-    pthread_mutex_lock(&pool->m);
+    pthread_mutex_lock(&pool->lock);
     pool->shutting_down = 1;
     pthread_cond_broadcast(&pool->not_empty);
     pthread_cond_broadcast(&pool->not_full);
-    pthread_mutex_unlock(&pool->m);
+    pthread_mutex_unlock(&pool->lock);
 }
 
 void thread_pool_destroy(ThreadPool* pool) {
@@ -186,7 +183,7 @@ void thread_pool_destroy(ThreadPool* pool) {
         pthread_join(pool->threads[i], NULL);
     }
 
-    pthread_mutex_destroy(&pool->m);
+    pthread_mutex_destroy(&pool->lock);
     pthread_cond_destroy(&pool->not_empty);
     pthread_cond_destroy(&pool->not_full);
 

@@ -29,7 +29,7 @@ typedef struct {
 } listener;
 
 /* Server: opaque in header, defined here */
-struct server {
+struct Server {
     Pyoneer* pyoneer;
     Logger* logger;
 
@@ -179,7 +179,7 @@ Server* server_create(Pyoneer* pyoneer, Logger* logger,
     if (!pyoneer || !logger || !cfg) return NULL;
 
     if (!cfg->endpoints || cfg->nendpoints == 0) {
-        logger_error(logger, "server_create: Missing endpoints");
+        logger_error(logger, "server_create: missing endpoints");
         return NULL;
     }
 
@@ -271,7 +271,7 @@ int server_run(Server* s) {
             if (client_fd < 0) {
                 if (errno == EINTR) continue;
                 logger_warnf(s->logger, "accept %s: %s",
-                             s->listeners[i].label, strerror(errno));
+                    s->listeners[i].label, strerror(errno));
                 continue;
             }
 

@@ -2,15 +2,7 @@
 #include <stdlib.h>
 
 #include "blueprint.h"
-#include "common.h"
-
-typedef struct Blueprint {
-    blueprint_t kind;
-    union {
-        Job* job;
-        Project* project;
-    } as;
-} Blueprint;
+#include "shared.h"
 
 /* blueprint_destroy: Destroys the blueprint and frees its resources. */
 void blueprint_destroy(Blueprint* blueprint) {
