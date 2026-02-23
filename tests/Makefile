@@ -14,6 +14,9 @@ PYONEER_OBJS := $(patsubst %.c,$(BUILD_DIR)/tests/%.o,$(PYONEER_SRCS))
 SHARED_SRCS := $(shell find shared -name '*.c')
 SHARED_OBJS := $(patsubst %.c,$(BUILD_DIR)/tests/%.o,$(SHARED_SRCS))
 
+UNITTEST_SRCS := $(shell find shared -name '*.c')
+UNITTEST_OBJS := $(patsubst %.c,$(BUILD_DIR)/tests/%.o,$(UNITTEST_SRCS))
+
 OBJS := $(patsubst %.o,$(BUILD_DIR)/%.o,$(OBJS))
 
 all: $(BIN_DIR)/test_api $(BIN_DIR)/test_blueprints $(BIN_DIR)/test_pyoneers

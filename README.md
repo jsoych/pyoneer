@@ -62,4 +62,14 @@ To avoid confusion with the name of the distributed system, we use:
 
 - Workers are **lazy** and idle after completing a job.
 
-- Objects are opaque.  
+## Naming and Codebase conventions
+
+- Objects are uppercased and opaque.
+
+- Data structures are lowercased and visible.
+
+- A module is defined by a public header file and its implementation.
+
+- A package is a collection of related modules, organized and distributed together.
+
+- A program composes one or more packages into an executable.
