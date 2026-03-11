@@ -3,6 +3,7 @@
 
 #include "job.h"
 #include "project.h"
+#include "task.h"
 
 typedef enum {
     BLUEPRINT_JOB,
@@ -10,11 +11,12 @@ typedef enum {
 } blueprint_t;
 
 typedef struct Blueprint {
-    blueprint_t kind;
     union {
         Job* job;
         Project* project;
+        Task* task;
     } as;
+    blueprint_t kind;
 } Blueprint;
 
 void blueprint_destroy(Blueprint* blueprint);

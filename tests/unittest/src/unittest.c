@@ -37,6 +37,13 @@ static int check_kind(int kind)
     return (kind == UNITTEST_TEST || kind == UNITTEST_SUITE);
 }
 
+unittest_opts_t unittest_opts_default()
+{
+    return (unittest_opts_t){
+        .timeout_ms = -1,
+        .level = UNITTEST_DEFAULT};
+}
+
 static UnittestResult *unittest_result_create(int kind)
 {
     if (!check_kind(kind))
@@ -209,6 +216,16 @@ int unittest_add(Unittest *suite, Unittest *test)
     if (suite->kind != UNITTEST_SUITE || test->kind != UNITTEST_TEST)
         return -1;
     return suite_add(suite->as.suite, test->as.test);
+}
+
+int unittest_add_test(Unittest* suite, const char *name, unittest_fn fn)
+{
+    if (!suite)
+        return -1;
+    Unittest* test = unittest_create_test(name, fn);
+    if (!test)
+        return -1;
+    return unittest_add(suite, test);
 }
 
 UnittestResult *unittest_run(const Unittest *ut,

@@ -1,7 +1,7 @@
 #ifndef TEST_H
 #define TEST_H
 
-#include "unittest_core.h"
+#include "unittest.h"
 
 // test.h — Opaque runnable test object.
 

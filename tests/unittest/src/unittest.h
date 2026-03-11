@@ -1,9 +1,29 @@
 #ifndef UNITTEST_H
 #define UNITTEST_H
+#define DLINE "\n======================================================================"
+#define HLINE "\n----------------------------------------------------------------------"
 
-#include "unittest_core.h"
+typedef enum
+{
+    UNITTEST_QUIET = 0,
+    UNITTEST_DEFAULT = 1,
+    UNITTEST_VERBOSE = 2,
+    UNITTEST_DEBUG = 3
+} unittest_verbosity_t;
+
+typedef struct
+{
+    int timeout_ms;
+    unittest_verbosity_t level;
+} unittest_opts_t;
 
 typedef struct Unittest Unittest;
+
+typedef struct UnittestResult UnittestResult;
+
+typedef void (*unittest_fn)(UnittestResult *);
+
+unittest_opts_t unittest_opts_default();
 
 /* Destroys the UnittestResult and all of its resources. */
 void unittest_result_destroy(UnittestResult *result);
@@ -54,6 +74,10 @@ const char *unittest_get_name(Unittest *ut);
 
 /* Adds a new test to the suite. Returns 0 on success, and -1 on failure. */
 int unittest_add(Unittest *suite, Unittest *test);
+
+/* Creates a new test and adds it to the suite. Returns 0 on success, and -1
+ * on failure. */
+int unittest_add_test(Unittest *suite, const char* name, unittest_fn fn);
 
 /*
  * Runs the Unittest with the given run options. Returns a UnittestResult and

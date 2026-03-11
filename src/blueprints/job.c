@@ -475,7 +475,7 @@ job_runner_info_t job_runner_get_info(JobRunner* runner) {
 void job_runner_restart(JobRunner* runner) {
     pthread_cancel(runner->job_tid);
     pthread_join(runner->job_tid, NULL);
-    job_thread_create(runner);
+    (void)job_thread_create(runner);
 }
 
 /* job_runner_stop: Stops the job. */

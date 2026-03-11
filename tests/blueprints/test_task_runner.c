@@ -6,72 +6,91 @@
 
 extern Site* SITE;
 
-static result_t test_case_wait(unittest_case* expected) {
+static void test_case_destroy(UnittestResult* result) {
+    task_runner_destroy(NULL);
+    Task* task = task_create(SHORT_NAME);
+    if (!task) {
+        unittest_result_err(result, "failed to create Task");
+        goto cleanup;
+    }
+    TaskRunner* runner = task_run(task, SITE);
+    if (!runner) {
+        unittest_result_err(result, "failed to create TaskRunner");
+        goto cleanup;
+    }
+cleanup:
+    task_runner_destroy(runner);
+    task_destroy(task);
+}
+
+static void test_case_wait(UnittestResult* result) {
     Task* task = task_create(SHORT_NAME);
     TaskRunner* runner = task_run(task, SITE);
     if (!runner) {
-        printf("failed to create runner");
-        task_destroy(task);
-        return UNITTEST_ERROR;
+        unittest_result_err(result, "failed to create TaskRunner");
+        goto cleanup;
     }
     task_runner_wait(runner);
     task_runner_info_t info = task_runner_get_info(runner);
+    if (info.exit_code != 0 || info.signo != 0) {
+        unittest_result_fail(result, "unexpected exit_code (%d) or signo (%d)", info.exit_code, info.signo);
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
+    task_runner_destroy(runner);
     task_destroy(task);
-    free(runner);
-    if (info.exit_code == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
 }
 
-static result_t test_case_bug(unittest_case* expected) {
+static void test_case_bug(UnittestResult* result) {
     Task* task = task_create(BUG_NAME);
     TaskRunner* runner = task_run(task, SITE);
     task_runner_wait(runner);
     task_runner_info_t info = task_runner_get_info(runner);
+    if (info.exit_code == 0 || info.signo != 0) {
+        unittest_result_fail(result, "unexpected exit_code (%d) or signo (%d)", info.exit_code, info.signo);
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
+    task_runner_destroy(runner);
     task_destroy(task);
-    free(runner);
-    if (info.exit_code == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
 }
 
-static result_t test_case_stop(unittest_case* expected) {
+static void test_case_stop(UnittestResult* result) {
     Task* task = task_create(SHORT_NAME);
     TaskRunner* runner = task_run(task, SITE);
     task_runner_stop(runner);
     task_runner_info_t info = task_runner_get_info(runner);
-    if (info.signo == SIGSENT) {
-        printf("the task thread was cancelled before running\n");
-        free(runner);
-        task_destroy(task);
-        return UNITTEST_ERROR;
+    if (info.exit_code == 0xff && info.signo == 0) {
+        unittest_result_err(result, "the Task was stopped before it ran");
+        goto cleanup;
     }
-    free(runner);
-    task_destroy(task);
-    if (info.signo == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
-}
-
-static result_t test_case_destroy(unittest_case* expected) {
-    Task* task = task_create(SHORT_NAME);
-    TaskRunner* runner = task_run(task, SITE);
+    if (info.signo != SIGINT) {
+        unittest_result_fail(result, "unexpected signo (%d)", info.signo);
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
     task_runner_destroy(runner);
     task_destroy(task);
-    return UNITTEST_SUCCESS;
 }
 
-Unittest* test_task_runner_create(const char* name) {
-    Unittest* ut = unittest_create(name);
-    if (ut == NULL) return NULL;
+Unittest* create_task_runner_suite(const char* name) {
+    Unittest* suite = unittest_create_suite(name);
+    if (!suite) return NULL;
 
-    int success = EXIT_SUCCESS;
-    unittest_add(ut, "task_runner_wait", test_case_wait, CASE_INT, &success);
+    Unittest* test = unittest_create_test("task_destroy", test_case_destroy);
+    unittest_add(suite, test);
 
-    int bug = EXIT_FAILURE;
-    unittest_add(ut, "task_runner_wait - with bug", test_case_bug,
-        CASE_INT, &bug);
+    test = unittest_create_test("task_runner_wait", test_case_wait);
+    unittest_add(suite, test);
 
-    int interupt = SIGINT;
-    unittest_add(ut, "task_runner_stop", test_case_stop, CASE_INT, &interupt);
-    unittest_add(ut, "task_destroy", test_case_destroy, CASE_NONE, NULL);
+    test = unittest_create_test("task_runner_wait - with bug", test_case_bug);
+    unittest_add(suite, test);
 
-    return ut;
+    test = unittest_create_test("task_runner_stop", test_case_stop);
+    unittest_add(suite, test);
+
+    return suite;
 }

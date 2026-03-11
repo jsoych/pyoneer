@@ -4,7 +4,7 @@
 // suite.h - Opaque runnable test object.
 
 #include "test.h"
-#include "unittest_core.h"
+#include "unittest.h"
 
 typedef struct
 {

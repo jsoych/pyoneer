@@ -26,7 +26,7 @@ install: $(LIB_NAME)
 	sudo mkdir -p $(PREFIX)/include/unittest
 	sudo mkdir -p $(PREFIX)/lib
 	# Copy the public header
-	sudo cp include/unittest/unittest.h $(PREFIX)/include/unittest/
+	sudo cp $(SRC_DIR)/unittest.h $(PREFIX)/include/unittest/
 	# Copy the library file
 	sudo cp $(LIB_NAME) $(PREFIX)/lib/
 

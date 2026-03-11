@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "suite.h"
 #include "test_blueprints.h"
 
 Site* SITE;
@@ -15,36 +14,64 @@ int main() {
     );
     
     if (!SITE) {
-        fprintf(stderr, "main: Error: Missing environment variables\n");
+        fprintf(stderr, "main: error: missing environment variables\n");
         exit(EXIT_FAILURE);
     }
 
-    Suite* suite = suite_create(4 /* number of unit tests */);
-    if (suite == NULL) {
-        exit(EXIT_FAILURE);
-    }
-
-    Unittest* task = test_task_create("task");
-    Unittest* task_runner = test_task_runner_create("task runner");
-    Unittest* job = test_job_create("job");
-    Unittest* job_runner = test_job_runner_create("job runner");
-
-    if (!task || !task_runner || !job || !job_runner) {
-        unittest_destroy(task);
-        unittest_destroy(task_runner);
-        unittest_destroy(job);
-        suite_destroy(suite);
-        exit(EXIT_FAILURE);
-    }
-
-    suite_add(suite, task);
-    suite_add(suite, task_runner);
-    suite_add(suite, job);
-    suite_add(suite, job_runner);
-
-    suite_run(suite);
+    Unittest* suites[4] = {
+        create_task_suite("task"),
+        create_task_runner_suite("task runner"),
+        create_job_suite("job"),
+        create_job_runner_suite("job_runner")
+    };
     
-    suite_destroy(suite);
+    int rv = EXIT_SUCCESS;
+    for (int i = 0; i < 4; i++) {
+        if (!suites[i]) {
+            rv = EXIT_FAILURE;
+            goto cleanup;
+        }
+        UnittestResult* result = unittest_run(suites[i], NULL, NULL);
+        if (result) {
+            unittest_print_result(suites[i], result, UNITTEST_VERBOSE);
+            unittest_result_destroy(result);
+        }
+    }
+
+cleanup:
+    for (int i = 0; i < 4; i++) {
+        unittest_destroy(suites[i]);
+    }
     site_destroy(SITE);
-    exit(EXIT_SUCCESS);
+    exit(rv);
+}
+
+Job* create_job(int id, const char* task, int ntask, const char* bug, int nbug) {
+    Job* j = job_create(id);
+    if (!j) return NULL;
+    for (int i = 0; i < ntask; i++) {
+        Task* t = task_create(task);
+        if (!t) {
+            job_destroy(j);
+            return NULL;
+        }
+        if (job_add_task(j, t) == -1) {
+            job_destroy(j);
+            return NULL;
+        }
+    }
+
+    for (int i = 0; i < nbug; i++) {
+        Task* b = task_create(bug);
+        if (!b) {
+            job_destroy(j);
+            return NULL;
+        }
+        if (job_add_task(j, b) == -1) {
+            job_destroy(j);
+            return NULL;
+        }
+    }
+
+    return j;
 }

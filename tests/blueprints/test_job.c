@@ -3,95 +3,81 @@
 #include <unistd.h>
 
 #include "test_blueprints.h"
-#include "json-builder.h"
-#include "json-helpers.h"
 
 extern Site* SITE;
 
-const char* JOB_JSON = \
-"{ \
-    \"id\": 33, \
-    \"tasks\": [{\"name\": \"task.py\"}, {\"name\": \"task.py\"}], \
-    \"execMode\": \"sequential\", \
-    \"runMode\": \"repeat\" \
-}";
-const char* JOB_JSON_INVALID_TASK = \
-"{ \
-    \"id\": 42, \
-    \"tasks\": [{\"key\": \"value\"}] \
-}";
-
-static result_t test_case_create(unittest_case* expected) {
+static void test_create(UnittestResult* result) {
     Job* job = job_create(VALID_ID);
-    if (job == NULL) return UNITTEST_FAILURE;
-    
-    // Check properties
-    int result = 0;
-    if (job_get_id(job) != VALID_ID || job_get_status(job) != JOB_READY ||
-        job_get_size(job) != 0) result = 1;
-                
-    job_destroy(job);
-    RETURN_RESULT(result);
-}
-
-static result_t test_case_invalid_id(unittest_case* expected) {
-    Job* job = job_create(INVALID_ID);
-    if (job == NULL) return UNITTEST_SUCCESS;
-    job_destroy(job);
-    return UNITTEST_FAILURE;
-}
-
-static result_t test_case_destroy(unittest_case* expected) {
-    // Check NULL
-    job_destroy(NULL);
-
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 10; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+    if (!job) {
+        unittest_result_fail(result, "failed to create Job");
+        return;
     }
-
-    job_destroy(job);
-    return UNITTEST_SUCCESS;
-}
-
-static result_t test_case_get_status(unittest_case* expected) {
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 3; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+    if (job_get_id(job) != VALID_ID) {
+        unittest_result_fail(result, "unexpected id (%s)", job_get_id(job));
+        goto cleanup;
     }
-
-    // Check ready
     if (job_get_status(job) != JOB_READY) {
-        job_node* curr = job_get_tasks(job);
-        while (curr) {
-            printf("task status: %d\n", task_get_status(curr->task));
-            curr = curr->next;
-        }
-        job_destroy(job);
-        printf("failed ready check");
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "unexpected status (%d)", job_get_status(job));
+        goto cleanup;
+    }
+    if (job_get_size(job) != 0) {
+        unittest_result_fail(result, "unexpected size (%d)", job_get_size(job));
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup: 
+    job_destroy(job);
+}
+
+static void test_invalid_id(UnittestResult* result) {
+    Job* job = job_create(INVALID_ID);
+    if (job) {
+        unittest_result_fail(result, "unexpected id (%d)", job_get_id(job));
+        return;
+    }
+    unittest_result_ok(result);
+}
+
+static void test_destroy(UnittestResult* result) {
+    job_destroy(NULL);
+    Job* job = create_job(VALID_ID, TASK_NAME, 5, BUG_NAME, 3);
+    if (!job) {
+        unittest_result_err(result, "failed to create Job");
+        return;
+    }
+    job_destroy(job);
+    unittest_result_ok(result);
+}
+
+static void test_get_status(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 3, NULL, 0);
+    if (!job) {
+        unittest_result_err(result, "failed to create Job");
+        return;
     }
 
-    // Check running
+    // check ready
+    if (job_get_status(job) != JOB_READY) {
+        unittest_result_fail(result, "status is not ready");
+        goto cleanup;
+    }
+
+    // check running
     job_node* head = job_get_tasks(job);
     task_set_status(head->next->task, TASK_RUNNING);
     if (job_get_status(job) != JOB_RUNNING) {
-        job_destroy(job);
-        printf("failed running check");
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "status is not running");
+        goto cleanup;
     }
 
-    // Check not ready
+    // check not ready
     task_set_status(head->next->task, TASK_NOT_READY);
     if (job_get_status(job) != JOB_NOT_READY) {
-        job_destroy(job);
-        printf("failed not ready check");
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "status is not not_ready");
+        goto cleanup;
     }
 
-    // Check completed
+    // check completed
     job_node* curr = job_get_tasks(job);
     while (curr) {
         task_set_status(curr->task, TASK_COMPLETED);
@@ -99,379 +85,418 @@ static result_t test_case_get_status(unittest_case* expected) {
     }
     
     if (job_get_status(job) != JOB_COMPLETED) {
-        job_destroy(job);
-        printf("failed completed check");
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "status is not completed");
+        goto cleanup;
     }
 
     // Check incomplete
     task_set_status(head->next->next->task, TASK_INCOMPLETE);
     if (job_get_status(job) != JOB_INCOMPLETE) {
-        job_destroy(job);
-        printf("failed incomplete check");
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "status is not incomplete");
+        goto cleanup;
     }
 
+cleanup:
     job_destroy(job);
-    return UNITTEST_SUCCESS;
 }
 
-static result_t test_case_run(unittest_case* expected) {
+static void test_run(UnittestResult* result) {
     Job* job = job_create(VALID_ID);
     JobRunner* runner = job_run(job, SITE);
     if (runner) {
-        job_destroy(job);
-        job_runner_destroy(runner);
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "created runner");
+        goto cleanup;
     }
 
-    // Add tasks to job
+    // add tasks to job
     for (int i = 0; i < 3; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+        Task* t = task_create(TASK_NAME);
+        if (!t) {
+            unittest_result_err(result, "failed to create Task");
+            goto cleanup;
+        }
+        if (job_add_task(job, t) == -1) {
+            unittest_result_err(result, "failed to add Task");
+            goto cleanup;
+        }
     }
 
+    // run job
     runner = job_run(job, SITE);
     if (!runner) {
-        job_destroy(job);
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "failed to run");
+        goto cleanup;
     }
     job_runner_wait(runner);
-
-    // Clean up and return result
-    int actual = job_get_status(job);
-    job_destroy(job);
-    job_runner_destroy(runner);
-    if (actual == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
-}
-
-static result_t test_case_bug(unittest_case* expected) {
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 4; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+    if (job_get_status(job) != JOB_COMPLETED) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
     }
-    Task* bug = task_create(BUG_NAME);
-    job_add_task(job, bug);
+    unittest_result_ok(result);
 
-    JobRunner* runner = job_run(job, SITE);
-    job_runner_wait(runner);
-
-    int actaul = job_get_status(job);
-    job_destroy(job);
+cleanup:
     job_runner_destroy(runner);
-    if (actaul == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
+    job_destroy(job);
 }
 
-static result_t test_case_many_bugs(unittest_case* expected) {
-    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 1, BUG_NAME, 5);
+static void test_bug(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 4, BUG_NAME, 1);
+    if (!job) {
+        unittest_result_err(result, "failed to create Job");
+        return;
+    }
     JobRunner* runner = job_run(job, SITE);
     job_runner_wait(runner);
-    job_destroy(job);
+    if (job_get_status(job) != JOB_NOT_READY) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
     job_runner_destroy(runner);
-    return UNITTEST_SUCCESS;
+    job_destroy(job);
 }
 
-static result_t test_case_parallel(unittest_case* expected) {
-    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 3, BUG_NAME, 2);
+static void test_many_bugs(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 1, BUG_NAME, 5);
+    JobRunner* runner = job_run(job, SITE);
+    job_runner_wait(runner);
+    if (job_get_status(job) != JOB_NOT_READY) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
+    job_runner_destroy(runner);
+    job_destroy(job);
+}
+
+static void test_parallel(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 3, BUG_NAME, 2);
     job_opts_t opts = job_opts_default();
     opts.exec_mode = JOB_EXEC_PARALLEL;
     job_set_opts(job, &opts);
+
     JobRunner* runner = job_run(job, SITE);
     job_runner_wait(runner);
-    job_destroy(job);
+    if (job_get_status(job) != JOB_COMPLETED) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+
+cleanup:
     job_runner_destroy(runner);
-    return UNITTEST_SUCCESS;
+    job_destroy(job);
 }
 
-static void print_info(job_runner_info_t* info) {
-    printf("attempts %d, completions %d, successes %d",
-        info->attempts, info->completions, info->successes);
-}
-
-static result_t test_case_repeat(unittest_case* expected) {
-    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 3, NULL, 0);
+static void test_repeat(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 3, NULL, 0);
     job_opts_t opts = job_opts_default();
     opts.run_mode = JOB_RUN_REPEAT;
     job_set_opts(job, &opts);
 
     JobRunner* runner = job_run(job, SITE);
-    job_runner_info_t info = job_runner_get_info(runner);
-    int i = 0;
-    do {
+    for (int i = 0; i < 10; i++) {
+        job_runner_info_t info = job_runner_get_info(runner);
         if (info.attempts < info.completions) {
-            printf("less attemps than completions");
-            job_runner_destroy(runner);
-            job_destroy(job);
-            return UNITTEST_FAILURE;
+            unittest_result_fail(result, "less attempts than completions");
+            goto cleanup;
         }
-
         if (info.completions < info.successes) {
-            printf("less completions than successes");
-            job_runner_destroy(runner);
-            job_destroy(job);
-            return UNITTEST_FAILURE;
+            unittest_result_fail(result, "less completions than successes");
+            goto cleanup;
         }
-
-        info = job_runner_get_info(runner);
-        i++;
         sleep(1);
-    } while (info.attempts < 3 && i < 15);
-
-    if (i == 15) {
-        print_info(&info);
-        job_runner_destroy(runner);
-        job_destroy(job);
-        return UNITTEST_FAILURE;
     }
+
+    if (job_get_status(job) != JOB_COMPLETED) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+
+cleanup:
     job_runner_destroy(runner);
     job_destroy(job);
-    return UNITTEST_SUCCESS;
 }
 
-static result_t test_case_parallel_repeat(unittest_case* expected) {
-    Job* job = unittest_job_create(VALID_ID, TASK_NAME, 20, BUG_NAME, 10);
+static void test_parallel_repeat(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 20, BUG_NAME, 10);
     job_opts_t opts = job_opts_default();
     opts.exec_mode = JOB_EXEC_PARALLEL;
     opts.run_mode = JOB_RUN_REPEAT;
     job_set_opts(job, &opts);
 
     JobRunner* runner = job_run(job, SITE);
-    job_runner_info_t info = {0};
-    int i = 0;
-    do {
-        info = job_runner_get_info(runner);
-        i++;
-        sleep(1);
-    } while (info.attempts < 3 && i < 30);
+    sleep(10);
 
-    if (i == 30) {
-        print_info(&info);
-        job_runner_destroy(runner);
-        job_destroy(job);
-        return UNITTEST_FAILURE;
+    job_runner_info_t info = job_runner_get_info(runner);
+    if (info.attempts < 3) {
+        unittest_result_fail(result, "fewer than 3 attempts");
+        goto cleanup;
     }
-
-    if (info.attempts != 3 || info.successes != 0) {
-        print_info(&info);
-        job_runner_destroy(runner);
-        job_destroy(job);
-        return UNITTEST_FAILURE;
+    if (info.successes != 0) {
+        unittest_result_fail(result, "unexpected success");
+        goto cleanup;
     }
+    unittest_result_ok(result);
 
+cleanup:
     job_runner_destroy(runner);
     job_destroy(job);
-    return UNITTEST_SUCCESS;
 }
 
-static result_t test_case_stop(unittest_case* expected) {
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 3; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+static void test_stop(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 3, NULL, 0);
+    if (!job) {
+        unittest_result_fail(result, "failed to create Job");
+        return;
     }
     JobRunner* runner = job_run(job, SITE);
-    if (!runner) {
-        job_destroy(job);
-        return UNITTEST_ERROR;
-    }
     job_runner_stop(runner);
-    int actual = job_get_status(job);
+    if (job_get_status(job) == JOB_READY) {
+        unittest_result_err(result, "failed to run");
+        goto cleanup;
+    }
+    if (job_get_status(job) != JOB_INCOMPLETE) {
+        unittest_result_fail(result, "unexpected status");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+cleanup:
     job_runner_destroy(runner);
     job_destroy(job);
-    if (actual == expected->as.integer) return UNITTEST_SUCCESS;
-    return UNITTEST_FAILURE;
 }
 
-static result_t test_case_add(unittest_case* expected) {
+static void test_add(UnittestResult* result) {
     Job* job = job_create(VALID_ID);
-    if (job_get_size(job) != 0) {
-        job_destroy(job);
-        return UNITTEST_FAILURE;
-    }
-
-    // Add 3 tasks
     for (int i = 0; i < 3; i++) {
         Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+        if (job_add_task(job, task) == -1) {
+            unittest_result_fail(result, "failed to add Task");
+            goto cleanup;
+        }
     }
-
     if (job_get_size(job) != 3) {
-        job_destroy(job);
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "unexpected size");
+        goto cleanup;
     }
 
-    // Add 7 more tasks
     for (int i = 0; i < 7; i++) {
         Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+        if (job_add_task(job, task) == -1) {
+            unittest_result_fail(result, "failed to add Task");
+            goto cleanup;
+        }
     }
-
     if (job_get_size(job) != 10) {
-        job_destroy(job);
-        return UNITTEST_FAILURE;
+        unittest_result_fail(result, "unexpected size");
     }
+    unittest_result_ok(result);
 
+cleanup:
     job_destroy(job);
-    return UNITTEST_SUCCESS;
 }
 
-static result_t test_case_encode(unittest_case* expected) {
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 2; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+static void test_encode(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 2, NULL, 0);
+    if (!job) {
+        unittest_result_err(result, "failed to create Job");
+        return;
     }
-    job_opts_t opts = job_opts_default();
-    opts.run_mode = JOB_RUN_REPEAT;
+    job_opts_t opts = {
+        .exec_mode = JOB_EXEC_SEQUENTIAL,
+        .run_mode = JOB_RUN_REPEAT
+    };
     job_set_opts(job, &opts);
 
     json_value* actual = job_encode(job);
     if (!actual) {
-        printf("failed to encode");
+        unittest_result_fail(result, "failed to encode Job");
         job_destroy(job);
-        return UNITTEST_FAILURE;
+        return;
     }
 
-    int result = json_value_compare(actual, expected->as.json);
-    if (result == -1) {
-        printf("failed to compare\n");
-        job_destroy(job);
-        json_value_free(actual);
-        return UNITTEST_ERROR;
-    }
-
-    char buf[BUFSIZE] = {0};
-    json_serialize(buf, actual);
-    printf("actual: %s\n", buf);
-
-    json_serialize(buf, expected->as.json);
-    printf("expected: %s\n", buf);
-
-    job_destroy(job);
-    json_value_free(actual);
-    RETURN_RESULT(result);
-}
-
-static result_t test_case_encode_status(unittest_case* expected) {
-    Job* job = job_create(VALID_ID);
-    Task* task = task_create(TASK_NAME);
-    job_add_task(job, task);
-    json_value* actual = job_encode_status(job);
-    char buf[BUFSIZE];
-    json_serialize(buf, actual);
-    printf("actual: %s\n", buf);
-    job_destroy(job);
-    RETURN_RESULT(json_value_compare(actual, expected->as.json));
-}
-
-static result_t test_case_decode(unittest_case* expected) {
-    json_value* obj = json_parse(JOB_JSON, strlen(JOB_JSON));
-    if (!obj) return UNITTEST_ERROR;
-    Job* actual = job_decode(obj);
-    if (!actual) {
-        printf("failed to decode\n");
-        json_value_free(obj);
-        return UNITTEST_FAILURE;
-    }
-    int result = unittest_compare_job(actual, expected->as.job);
-    job_destroy(actual);
-    RETURN_RESULT(result);
-}
-
-static result_t test_case_invalid_task(unittest_case* expected) {
-    json_value* obj = json_parse(JOB_JSON_INVALID_TASK,
-        strlen(JOB_JSON_INVALID_TASK));
-    if (!obj) return UNITTEST_ERROR;
-    Job* actual = job_decode(obj);
-    if (!actual) return UNITTEST_SUCCESS;
-    job_destroy(actual);
-    return UNITTEST_FAILURE;
-}
-
-Unittest* test_job_create(const char* name) {
-    Unittest* ut = unittest_create(name);
-
-    unittest_add(ut, "job_create", test_case_create,
-        CASE_NONE, NULL);
-
-    unittest_add(ut, "job_create - invalid id", test_case_invalid_id,
-        CASE_NONE, NULL);
-
-    unittest_add(ut, "job_destroy", test_case_destroy,
-        CASE_NONE, NULL);
-
-    unittest_add(ut, "job_get_status", test_case_get_status,
-        CASE_NONE, NULL);
-
-    unittest_add(ut, "job_add_task", test_case_add, CASE_NONE, NULL);
-
-    int completed = JOB_COMPLETED;
-    unittest_add(ut, "job_run", test_case_run, CASE_INT, &completed);
-
-    int not_ready = JOB_NOT_READY;
-    unittest_add(ut, "job_run - with bug", test_case_bug,
-        CASE_INT, &not_ready);
-    
-    unittest_add(ut, "job_run - many bugs", test_case_many_bugs,
-        CASE_NONE, NULL);
-    
-    unittest_add(ut, "job_run - parrallel", test_case_parallel,
-        CASE_NONE, NULL);
-    
-    unittest_add(ut, "job_run - repeat", test_case_repeat, CASE_NONE, NULL);
-
-    unittest_add(ut, "job_run - parrallel repeat", test_case_parallel_repeat,
-        CASE_NONE, NULL);
-    
-    int incomplete = JOB_INCOMPLETE;
-    unittest_add(ut, "job_run - stop", test_case_stop,
-        CASE_INT, &incomplete);
-    
-    // Create expected job encoding
-    json_value* obj = json_object_new(0);
-    json_object_push_integer(obj, "id", VALID_ID);
-    json_object_push_string(obj, "execMode", "sequential");
-    json_object_push_string(obj, "runMode", "repeat");
-    json_value* arr = json_array_new(3);
+    json_value* expected = json_object_new(0);
+    json_object_push_integer(expected, "id", VALID_ID);
+    json_object_push_string(expected, "execMode", "sequential");
+    json_object_push_string(expected, "runMode", "repeat");
+    json_value* tasks = json_array_new(3);
     for (int i = 0; i < 2; i++) {
         json_value* task = json_object_new(0);
         json_object_push_string(task, "name", TASK_NAME);
-        json_array_push(arr, task);
+        json_array_push(tasks, task);
     }
-    json_object_push(obj, "tasks", arr);
+    json_object_push(expected, "tasks", tasks);
 
-    unittest_add(ut, "job_encode", test_case_encode, CASE_JSON, obj);
+    int rv = json_value_compare(actual, expected);
+    if (rv == -1) {
+        unittest_result_err(result, "failed to compare JSON");
+        goto cleanup;
+    }
+    if (rv != 0) {
+        char actual_buf[BUFSIZE];
+        int size = json_measure(actual);
+        if (size > BUFSIZE) {
+            unittest_result_fail(result, "actaul JSON too large (%d)", size);
+            goto cleanup;
+        }
+        json_serialize(actual_buf, actual);
+        actual_buf[size] = '\0';
 
-    // Create expected job status
-    json_value* ready = json_object_new(0);
-    json_object_push_string(ready, "status", "ready");
+        char expected_buf[BUFSIZE];
+        size = json_measure(expected);
+        if (size > BUFSIZE) {
+            unittest_result_err(result, "expected JSON too large (%d)", size);
+            goto cleanup;
+        }
+        expected_buf[size] = '\0';
+
+        unittest_result_fail(result, "expected %s, actual %s",
+            expected_buf, actual_buf);
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+    
+cleanup:
+    json_value_free(actual);
+    json_value_free(expected);
+    job_destroy(job);
+}
+
+static void test_encode_status(UnittestResult* result) {
+    Job* job = create_job(VALID_ID, TASK_NAME, 1, NULL, 0);
+    if (!job) {
+        unittest_result_err(result, "failed to create Job");
+        return;
+    }
+
+    json_value* actual = job_encode_status(job);
+    if (!actual) {
+        unittest_result_fail(result, "failed to encode status");
+        job_destroy(job);
+        return;
+    }
+
+    // create expected status
+    json_value* expected = json_object_new(0);
+    json_object_push_integer(expected, "id", VALID_ID);
+    json_object_push(expected, "status", job_status_map(JOB_READY));
     json_value* tasks = json_array_new(1);
-    json_value* task_status = json_object_new(0);
-    json_object_push_string(task_status, "status", "ready");
-    json_object_push_string(task_status, "name", TASK_NAME);
-    json_array_push(tasks, task_status);
-    json_object_push(ready, "tasks", tasks);
-    
-    unittest_add(ut, "job_encode_status", test_case_encode_status,
-        CASE_JSON, ready);
-    
-    // Create expected job
-    Job* job = job_create(VALID_ID);
-    for (int i = 0; i < 2; i++) {
-        Task* task = task_create(TASK_NAME);
-        job_add_task(job, task);
+    json_value* status = json_object_new(0);
+    json_object_push(status, "status", task_status_map(TASK_READY));
+    json_object_push_string(status, "name", TASK_NAME);
+    json_array_push(tasks, status);
+    json_object_push(expected, "tasks", tasks);
+
+    int rv = json_value_compare(actual, expected);
+    if (rv == -1) {
+        unittest_result_err(result, "failed to compare JSON");
+        goto cleanup;
     }
-    job_opts_t opts = job_opts_default();
-    opts.run_mode = JOB_RUN_REPEAT;
-    job_set_opts(job, &opts);
+    if (rv != 0) {
+        unittest_result_fail(result, "unexpected JSON");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+
+cleanup:
+    json_value_free(actual);
+    json_value_free(expected);
+    job_destroy(job);
+}
+
+static void test_decode(UnittestResult* result) {
+    const char* json = "{ \
+        \"id\": 33, \
+        \"tasks\": [{\"name\": \"task.py\"}, {\"name\": \"task.py\"}], \
+        \"execMode\": \"sequential\", \
+        \"runMode\": \"repeat\" \
+    }";
+    json_value* obj = json_parse(json, strlen(json));
+    if (!obj) {
+        unittest_result_err(result, "failed to parse JSON");
+        return;
+    }
+
+    Job* job = job_decode(obj);
+    if (!job) {
+        unittest_result_fail(result, "failed to decode JSON");
+        goto cleanup;
+    }
+    if (job_get_id(job) != 33) {
+        unittest_result_fail(result, "unexpected id");
+        goto cleanup;
+    }
+    if (job_get_size(job) != 2) {
+        unittest_result_fail(result, "unexpected size");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+
+cleanup:
+    json_value_free(obj);
+    job_destroy(job);
+}
+
+static void test_invalid_task(UnittestResult* result) {
+    const char* json = "{ \
+        \"id\": 42, \
+        \"tasks\": [{\"key\": \"value\"}] \
+    }";
+    json_value* obj = json_parse(json, strlen(json));
+    if (!obj) {
+        unittest_result_err(result, "failed to parse JSON");
+        return;
+    }
+
+    Job* job = job_decode(obj);
+    if (job) {
+        unittest_result_fail(result, "decoded invalid task");
+        goto cleanup;
+    }
+    unittest_result_ok(result);
+
+cleanup:
+    json_value_free(obj);
+    job_destroy(job);
+}
+
+Unittest* create_job_suite(const char* name) {
+    Unittest* suite = unittest_create_suite(name);
+
+    unittest_add_test(suite, "job_create", test_create);
+
+    unittest_add_test(suite, "job_create - invalid id", test_invalid_id);
+
+    unittest_add_test(suite, "job_destroy", test_destroy);
+
+    unittest_add_test(suite, "job_get_status", test_get_status);
+
+    unittest_add_test(suite, "job_add_task", test_add);
+
+    unittest_add_test(suite, "job_run", test_run);
+
+    unittest_add_test(suite, "job_run - with bug", test_bug);
     
-    unittest_add(ut, "job_decode", test_case_decode, CASE_JOB, job);
+    unittest_add_test(suite, "job_run - many bugs", test_many_bugs);
+    
+    unittest_add_test(suite, "job_run - parrallel", test_parallel);
+    
+    unittest_add_test(suite, "job_run - repeat", test_repeat);
 
-    unittest_add(ut, "job_decode - invalid task",
-        test_case_invalid_task, CASE_NONE, NULL);
+    unittest_add_test(suite, "job_run - parrallel repeat", test_parallel_repeat);
+    
+    unittest_add_test(suite, "job_run - stop", test_stop);
 
-    return ut;
+    unittest_add_test(suite, "job_encode", test_encode);
+    
+    unittest_add_test(suite, "job_encode_status", test_encode_status);
+    
+    unittest_add_test(suite, "job_decode", test_decode);
+
+    unittest_add_test(suite, "job_decode - invalid task", test_invalid_task);
+
+    return suite;
 }

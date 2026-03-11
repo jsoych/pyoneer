@@ -19,13 +19,15 @@ UNITTEST_OBJS := $(patsubst %.c,$(BUILD_DIR)/tests/%.o,$(UNITTEST_SRCS))
 
 OBJS := $(patsubst %.o,$(BUILD_DIR)/%.o,$(OBJS))
 
+blueprints: $(BIN_DIR)/test_blueprints
+
 all: $(BIN_DIR)/test_api $(BIN_DIR)/test_blueprints $(BIN_DIR)/test_pyoneers
 
 $(BIN_DIR)/test_api: $(OBJS) $(API_OBJS) $(SHARED_OBJS)
 	$(CC) $^ -o $@
 
-$(BIN_DIR)/test_blueprints: $(OBJS) $(BLUE_OBJS) $(SHARED_OBJS)
-	$(CC) $^ -o $@
+$(BIN_DIR)/test_blueprints: $(OBJS) $(BLUE_OBJS) # $(SHARED_OBJS)
+	$(CC) $^ -lunittest -o $@
 
 $(BIN_DIR)/test_pyoneers: $(OBJS) $(PYONEER_OBJS) $(SHARED_OBJS)
 	$(CC) $^ -o $@
