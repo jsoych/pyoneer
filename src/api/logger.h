@@ -22,7 +22,8 @@
 #define LOGGER_H
 
 // Log levels.
-enum {
+enum
+{
     LOGGER_DEBUG = 0,
     LOGGER_INFO,
     LOGGER_WARN,
@@ -34,14 +35,14 @@ typedef struct Logger Logger;
 // logger_create allocates a new Logger instance with the given minimum level.
 // Messages below `level` may be suppressed.
 // Returns a new Logger on success; NULL on error.
-Logger* logger_create(int level, const char* name);
+Logger *logger_create(int level, const char *name);
 
 // logger_destroy flushes and frees a Logger.
 // Safe to call with NULL.
-void logger_destroy(Logger* logger);
+void logger_destroy(Logger *logger);
 
 // logger_get_level gets the Logger level and returns it.
-int logger_get_level(Logger* logger);
+int logger_get_level(Logger *logger);
 
 // logger_log writes a formatted message at the given level.
 // Returns 0 on success; -1 on failure.
@@ -49,7 +50,7 @@ int logger_get_level(Logger* logger);
 // Preconditions:
 // - logger must not be NULL.
 // - fmt must be a valid printf format string.
-int logger_log(Logger* logger, int level, const char* fmt, ...);
+int logger_log(Logger *logger, int level, const char *fmt, ...);
 
 /* Plain message macros (no formatting). */
 #define logger_debug(logger, msg) \

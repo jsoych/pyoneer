@@ -4,8 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/Users/leejahsprock/cs/distributed-systems/src/**",
-                "/Users/leejahsprock/cs/distributed-systems/tests/**"
+                "/Users/leejahsprock/cs/pyoneer/build/include/**",
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

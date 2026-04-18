@@ -1,0 +1,6 @@
+[submodule "unittest"]
+	path = vendor/unittest
+	url = https://github.com/jsoych/unittest.git
+[submodule "libmicrohttpd"]
+	path = vendor/libmicrohttpd
+	url = https://git.gnunet.org/libmicrohttpd.git

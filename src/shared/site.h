@@ -22,10 +22,11 @@
  * - working_dir: Directory used as the process working directory when running tasks.
  *
  */
-typedef struct site {
-    char* python;
-    char* task_dir;
-    char* working_dir;
+typedef struct site
+{
+    char *python;
+    char *task_dir;
+    char *working_dir;
 } Site;
 
 // site_create allocates a new Site and copies the provided strings.
@@ -33,12 +34,12 @@ typedef struct site {
 //
 // Preconditions:
 // - python, task_dir, and working_dir must be non-NULL.
-Site* site_create(const char* python,
-                  const char* task_dir,
-                  const char* working_dir);
+Site *site_create(const char *python,
+                  const char *task_dir,
+                  const char *working_dir);
 
 // site_destroy frees the Site and its owned resources.
 // Safe to call with NULL.
-void site_destroy(Site* site);
+void site_destroy(Site *site);
 
 #endif

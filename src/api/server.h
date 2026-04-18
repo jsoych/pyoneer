@@ -27,10 +27,11 @@
 #include <stddef.h>
 
 #include "logger.h"
-#include "pyoneer.h"
+#include "pyoneer/pyoneer.h"
 
 // Server error codes used in logs and JSON responses (implementation-defined).
-enum {
+enum
+{
     ERR_INTERNAL = 0,
     ERR_SHUTTING_DOWN,
     ERR_CMD,
@@ -45,35 +46,38 @@ enum {
 // Supported listening endpoint types.
 // EP_UNIX is intended for local/dev/admin.
 // EP_TCP is intended for network deployments (e.g., behind a proxy).
-typedef enum {
+typedef enum
+{
     EP_UNIX = 0,
-    EP_TCP  = 1
+    EP_TCP = 1
 } endpoint_t;
 
 // server_endpoint describes one listening socket.
-typedef struct {
+typedef struct
+{
     endpoint_t type;
 
     // TCP endpoint configuration (used when type == EP_TCP).
     // host may be NULL to bind to wildcard (implementation-defined).
-    const char* host;     // e.g. "127.0.0.1", "0.0.0.0", "::"
-    const char* port;     // e.g. "8080"
+    const char *host; // e.g. "127.0.0.1", "0.0.0.0", "::"
+    const char *port; // e.g. "8080"
 
     // UNIX endpoint configuration (used when type == EP_UNIX).
-    const char* path;     // e.g. "/tmp/pyoneer.sock"
+    const char *path; // e.g. "/tmp/pyoneer.sock"
 
     // listen() backlog for this endpoint.
     int backlog;
 } server_endpoint;
 
 // server_config describes startup configuration for Server.
-typedef struct {
+typedef struct
+{
     // Array of endpoints to listen on.
-    const server_endpoint* endpoints;
+    const server_endpoint *endpoints;
     size_t nendpoints;
 
     // Shared authentication token required by clients.
-    const char* token;
+    const char *token;
 
     // Worker thread pool configuration.
     size_t nworkers;
@@ -90,23 +94,23 @@ typedef struct Server Server;
 // - pyoneer and logger must be valid and remain alive for the Server lifetime.
 // - cfg must be valid for the duration of server_create.
 // - cfg->endpoints must contain at least one endpoint.
-Server* server_create(Pyoneer* pyoneer, Logger* logger, const server_config* cfg);
+Server *server_create(Pyoneer *pyoneer, Logger *logger, const server_config *cfg);
 
 // server_destroy stops the server (if running) and frees server resources.
 // Safe to call with NULL.
-void server_destroy(Server* server);
+void server_destroy(Server *server);
 
 // Accessors (borrowed pointers; Server retains ownership of internal state).
-Logger*     server_logger(Server* server);
-Pyoneer*    server_pyoneer(Server* server);
-const char* server_token(Server* server);
+Logger *server_logger(Server *server);
+Pyoneer *server_pyoneer(Server *server);
+const char *server_token(Server *server);
 
 // server_run enters the main accept loop and blocks until the server stops.
 // Returns 0 on clean shutdown; -1 on error.
-int server_run(Server* server);
+int server_run(Server *server);
 
 // server_stop requests that server_run() exit.
 // This function is intended to be async-safe (implementation-defined).
-void server_stop(Server* server);
+void server_stop(Server *server);
 
 #endif

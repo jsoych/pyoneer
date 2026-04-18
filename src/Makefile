@@ -1,11 +1,18 @@
-INCLUDE := -Iapi -Iblueprints -Ipyoneers -Ishared
+PACKAGES := api blueprint pyoneer shared
 
-OBJS := $(patsubst %.o,$(BUILD_DIR)/%.o,$(OBJS))
-OBJS += $(BUILD_DIR)/main.o
+export AR ARFLAGS CC CFLAGS
 
-$(BIN_DIR)/$(TARGET): $(OBJS)
-	$(CC) $^ -o $@
+export TOP_DIR PREFIX PREFIX_BIN PREFIX_LIB PREFIX_INC
 
-$(BUILD_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
+.PHONY: all clean $(CLEAN) $(PACKAGES)
+
+all: $(PACKAGES)
+
+api: blueprint pyoneer shared
+
+pyoneer: blueprint shared
+
+blueprint: shared
+
+$(PACKAGES):
+	$(MAKE) -C $@

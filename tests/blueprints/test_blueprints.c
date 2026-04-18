@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include "test_blueprints.h"
+#include "print_macros.h"
 
 Site* SITE;
 
@@ -14,7 +15,7 @@ int main() {
     );
     
     if (!SITE) {
-        fprintf(stderr, "main: error: missing environment variables\n");
+        ERROR("missing environment variables");
         exit(EXIT_FAILURE);
     }
 
